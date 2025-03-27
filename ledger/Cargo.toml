@@ -5,3 +5,16 @@ edition = "2021"
 default-run = "ledger"
 
 [dependencies]
+sha2 = "0.10.6"
+rust-crypto = "^0.2"
+bincode = "2.0.1"
+failure = "0.1"
+sled = "0.34"
+log = "0.4"
+env_logger = "0.11.7"
+clap = "4.0.29"
+bitcoincash-addr = "0.5.2"
+rand = "0.9.0"
+merkle-cbt = "0.3.2"
+serde = {version = "1.0", features = ["derive"]}
+serde_json = "1.0"
