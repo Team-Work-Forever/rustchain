@@ -1,6 +1,9 @@
 # Ignore VSCode settings folder
 .vscode/
 
+# Ignore todo's
+todo.md
+
 # Ignore IntelliJ IDEA project folder
 .idea/
 
