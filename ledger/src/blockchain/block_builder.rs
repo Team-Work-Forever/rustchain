@@ -7,7 +7,7 @@ use serde::Serialize;
 #[derive(Debug)]
 pub struct BlockBuilder<TData: Serialize> {
     index: u64,
-    dificult: u32,
+    difficulty: u32,
     prev_hash: [u8; 32],
     transactions: Vec<Transaction<TData>>,
 }
@@ -16,15 +16,10 @@ impl<TData: Clone + Serialize> BlockBuilder<TData> {
     pub fn new(index: u64, dificult: u32, prev_hash: [u8; 32]) -> BlockBuilder<TData> {
         BlockBuilder {
             index,
-            dificult,
+            difficulty: dificult,
             prev_hash,
             transactions: vec![],
         }
-    }
-
-    pub fn add_transaction(&mut self, transaction: Transaction<TData>) -> &mut Self {
-        self.transactions.push(transaction);
-        self
     }
 
     pub fn add_transactions<Iterator>(&mut self, transactions: Iterator) -> &mut Self
@@ -59,7 +54,7 @@ impl<TData: Clone + Serialize> BlockBuilder<TData> {
 
             hash = hasher.hash(input);
 
-            if self.validate_hash(&hash, self.dificult) {
+            if self.validate_hash(&hash, self.difficulty) {
                 return Block::new(
                     self.index,
                     merkle_root,

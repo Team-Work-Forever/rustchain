@@ -1,4 +1,5 @@
 use hex;
+use log::info;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -62,7 +63,7 @@ impl MerkleTree {
 
     pub fn print_tree(&self) {
         for (i, level) in self.levels.iter().enumerate().rev() {
-            println!("Level {}: {:?}", i, level);
+            info!("Level {}: {:?}", i, level);
         }
     }
 }

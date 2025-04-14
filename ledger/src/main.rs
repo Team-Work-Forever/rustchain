@@ -1,29 +1,34 @@
-use ledger::blockchain::{BlockChain, Transaction};
+use core::time;
+use std::{sync::Arc, thread};
+
+use ledger::{
+    blockchain::{BlockChain, Transaction},
+    logger,
+};
+use log::{error, info};
+use rand::Rng;
 
 fn main() {
-    let mut block_chain = BlockChain::new();
+    logger::init_logger("info", "logs", "ledger");
 
-    println!("Start to mine block!");
-    let mined_block = block_chain.add_block(|mut builder| {
-        builder.add_transactions(vec![
-            Transaction::new("hash".to_string(), "another".to_string(), "Hit".to_string()),
-            Transaction::new("hash".to_string(), "another".to_string(), "Hot".to_string()),
-        ]);
+    let block_chain = BlockChain::<u32>::new();
+    let miner_thread = block_chain.start_miner(5, time::Duration::from_secs(60 * 2));
 
-        builder
+    let block_chain_clone = Arc::new(block_chain);
+
+    thread::spawn(move || loop {
+        thread::sleep(time::Duration::from_secs(15));
+
+        let data = rand::rng().random();
+        match block_chain_clone.add_transaction(Transaction::new(
+            "Diogo".to_string(),
+            "OnlyCavas".to_string(),
+            data,
+        )) {
+            Ok(_) => info!("[💰] Added Transaction: {}", data),
+            Err(_) => error!("Error while submitting transaction"),
+        }
     });
-    println!("Blocked Mined and added to the chain");
 
-    for block in block_chain.blocks.iter() {
-        println!("{:?}", block)
-    }
-
-    println!("Validating block");
-    let merkle_root = mined_block.merkle_root;
-
-    if mined_block.validate(merkle_root) {
-        println!("Valid!")
-    } else {
-        print!("Not valid!")
-    }
+    miner_thread.join().expect("Error running the minor");
 }

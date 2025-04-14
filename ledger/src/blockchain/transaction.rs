@@ -13,6 +13,6 @@ impl<TData: Serialize> Transaction<TData> {
     }
 
     pub fn to_json_string(&self) -> String {
-        serde_json::to_string(self).expect("msg")
+        serde_json::to_string(self).expect("Failed to serialize to JSON")
     }
 }
