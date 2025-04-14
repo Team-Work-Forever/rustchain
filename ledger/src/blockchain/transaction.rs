@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Clone, Serialize, Debug)]
 pub struct Transaction<TData> {
     pub from: String,
     pub to: String,

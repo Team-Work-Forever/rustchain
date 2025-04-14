@@ -1,4 +1,4 @@
-use std::fmt::{self};
+use std::fmt;
 
 use serde::Serialize;
 
@@ -58,15 +58,18 @@ impl<TData: Clone + Serialize> Block<TData> {
     }
 }
 
-impl<TData: Clone + fmt::Debug + Serialize> fmt::Debug for Block<TData> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl<TData> fmt::Debug for Block<TData>
+where
+    TData: Clone + Serialize + fmt::Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Block")
             .field("index", &self.index)
-            .field("merkle_root", &hex::encode(&self.merkle_root)) // You can .to_string() here if needed
-            .field("hash", &hex::encode(&self.hash))
-            .field("prev_hash", &hex::encode(&self.prev_hash))
-            .field("nonce", &self.nonce)
             .field("timestamp", &self.timestamp)
+            .field("merkle_root", &hex::encode(self.merkle_root))
+            .field("nonce", &self.nonce)
+            .field("prev_hash", &hex::encode(&self.prev_hash))
+            .field("hash", &hex::encode(&self.hash))
             .field("transactions", &self.transactions)
             .finish()
     }
