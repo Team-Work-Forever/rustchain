@@ -45,7 +45,7 @@ where
 
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .expect("Time went backwards")
+            .expect("Failed to calculate the timestamp")
             .as_nanos();
 
         loop {

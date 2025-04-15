@@ -1,10 +1,13 @@
 use sha2::{Digest, Sha256};
 
-pub trait HashFunc {
+pub trait HashFunc: Clone {
     fn hash(&self, value: String) -> [u8; 32];
 }
 
+#[derive(Clone)]
 pub struct DoubleHasher;
+
+#[derive(Clone)]
 pub struct DefaultHasher;
 
 impl HashFunc for DefaultHasher {

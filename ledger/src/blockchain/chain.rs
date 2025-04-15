@@ -1,18 +1,19 @@
+use log::error;
 use std::{
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex},
     thread::{self, JoinHandle},
     time,
 };
 
 use bincode::{Decode, Encode};
-use log::{error, info};
+use log::info;
 use serde::Serialize;
 
-use crate::store;
+use crate::store::BlockChainStorage;
 
 use super::{
-    block::Block, block_builder::BlockBuilder, hash_func::DoubleHasher, Transaction,
-    TransactionData,
+    block_builder::BlockBuilder, hash_func::DoubleHasher, transaction_pool::TransactionPool, Block,
+    HashFunc, TransactionData,
 };
 
 #[derive(Clone, Debug)]
@@ -23,7 +24,7 @@ where
     dificulty: u32,
     pub(crate) blocks: Vec<Block<TData>>,
 
-    pub(crate) transaction_poll: Arc<Mutex<Vec<Transaction<TData>>>>,
+    pub transaction_poll: TransactionPool<TData>,
 }
 
 impl<TData> BlockChain<TData>
@@ -34,80 +35,64 @@ where
         BlockChain {
             dificulty: 5,
             blocks: vec![Block::new_genesis()],
-            transaction_poll: Arc::new(Mutex::new(vec![])),
+            transaction_poll: TransactionPool::new(),
         }
     }
 
-    pub fn from_bin() -> BlockChain<TData>
+    pub fn validate<THasher>(&self, hasher: THasher) -> bool
     where
-        TData: Decode<()>,
+        THasher: HashFunc,
     {
-        match store::load_block_chain() {
-            Ok(block_chain) => block_chain,
-            Err(_) => BlockChain::<TData>::new(),
+        for block in self.blocks.iter() {
+            if !block.validate(hasher.clone(), block.merkle_root) {
+                return false;
+            }
         }
+
+        true
     }
 
-    pub fn add_transaction(&mut self, transaction: Transaction<TData>) -> Result<(), ()> {
-        let mut pool = self.get_lock_pool()?;
-        pool.push(transaction);
-
-        Ok(())
-    }
-
-    fn get_lock_pool(&self) -> Result<MutexGuard<Vec<Transaction<TData>>>, ()> {
-        self.transaction_poll
-            .lock()
-            .map_err(|e| error!("Failed to lock transaction pool {}", e))
-    }
-
-    pub fn start_miner(
-        block_chain: Arc<Mutex<BlockChain<TData>>>,
+    pub fn start_miner<TStorage>(
+        block_chain: Arc<Mutex<Self>>,
+        storage: Arc<TStorage>,
         batch_size: usize,
         batch_pulling: time::Duration,
     ) -> JoinHandle<()>
     where
         TData: Clone + Serialize + Send + 'static,
+        TStorage: BlockChainStorage<TData> + Send + 'static + Sync,
     {
         let block_chain = Arc::clone(&block_chain);
+        let storage = Arc::clone(&storage);
         info!("[⛏️] Miner thread started!");
 
         thread::spawn(move || loop {
             thread::sleep(batch_pulling);
             let mut block_chain = block_chain.lock().expect("Error locking block chain");
 
-            match block_chain.fetch_batch_transactions(batch_size) {
+            match block_chain
+                .transaction_poll
+                .fetch_batch_transactions(batch_size)
+            {
                 Ok(transactions) if !transactions.is_empty() => {
                     block_chain.add_block(|mut builder| {
                         builder.add_transactions(transactions);
                         builder
                     });
                 }
-                Ok(_) => {
-                    info!("No transactions to be added");
-                }
-                Err(e) => {
-                    error!("Failed to fetch transactions: {:?}", e);
-                }
+                Ok(_) => info!("No transactions to be added"),
+                Err(e) => error!("Failed to fetch transactions: {:?}", e),
             }
+
+            if let Err(_) = storage.store(&block_chain) {
+                error!("Failed to save block chain state!");
+            }
+
+            info!("State saved!");
         })
     }
 
-    fn fetch_batch_transactions(
-        &mut self,
-        batch_size: usize,
-    ) -> Result<Vec<Transaction<TData>>, ()> {
-        let mut pool = self.get_lock_pool()?;
-
-        if pool.is_empty() {
-            return Ok(vec![]);
-        }
-
-        let end = batch_size.min(pool.len());
-        Ok(pool.drain(0..end).collect::<Vec<_>>())
-    }
-
-    fn add_block<F>(&mut self, block_builder_fn: F) -> Block<TData>
+    pub(crate) fn add_block<F>(&mut self, block_builder_fn: F) -> Block<TData>
     where
         TData: Serialize,
         F: FnOnce(BlockBuilder<TData>) -> BlockBuilder<TData>,
@@ -129,12 +114,6 @@ where
 
         self.blocks.push(block.clone());
 
-        if let Err(_) = store::store_block_chain(&self) {
-            error!("Failed to save block chain state!");
-            return block;
-        }
-
-        info!("State saved!");
         block
     }
 
@@ -171,9 +150,9 @@ where
         let blocks = Vec::<Block<TData>>::decode(decoder)?;
 
         Ok(Self {
-            dificulty: dificulty,
-            blocks: blocks,
-            transaction_poll: Arc::new(Mutex::new(vec![])),
+            dificulty,
+            blocks,
+            transaction_poll: TransactionPool::new(),
         })
     }
 }

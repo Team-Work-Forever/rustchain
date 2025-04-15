@@ -1,4 +1,7 @@
-use std::fmt::Debug;
+use std::{
+    fmt::Debug,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use bincode::{Decode, Encode};
 use serde::Serialize;
@@ -13,6 +16,7 @@ where
     pub from: String,
     pub to: String,
     pub data: TData,
+    pub timestamp: u128,
 }
 
 impl<TData> Transaction<TData>
@@ -20,7 +24,17 @@ where
     TData: TransactionData,
 {
     pub fn new(from: String, to: String, data: TData) -> Transaction<TData> {
-        Transaction { from, to, data }
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Failed to calculate the timestamp")
+            .as_nanos();
+
+        Transaction {
+            from,
+            to,
+            data,
+            timestamp,
+        }
     }
 
     pub fn to_json_string(&self) -> String {

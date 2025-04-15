@@ -9,6 +9,7 @@ use bincode::{Decode, Encode};
 use ledger::{
     blockchain::{BlockChain, Transaction, TransactionData},
     logger,
+    store::{BlockChainStorage, InFileStorage},
 };
 
 use log::{error, info};
@@ -16,7 +17,7 @@ use rand::Rng;
 use serde::Serialize;
 
 // Transaction Poll
-const BATCH_PULLING_SIZE: usize = 5;
+const BATCH_PULLING_SIZE: usize = 15;
 const BATCH_PULLING_TIME_FRAME: Duration = time::Duration::from_secs(2 * 60); // 2 mins
 
 #[derive(Clone, Serialize, Debug, Encode, Decode)]
@@ -29,10 +30,21 @@ impl TransactionData for Data {}
 fn main() {
     logger::init_logger("info", "logs", "ledger");
 
-    let block_chain = Arc::new(Mutex::new(BlockChain::<Data>::from_bin()));
+    // local node
+    // load properly block chain
+    let storage = Arc::new(InFileStorage::new());
+    let block_chain = {
+        let block_chain = match storage.load() {
+            Ok(chain) => chain,
+            Err(_) => BlockChain::<Data>::new(),
+        };
+
+        Arc::new(Mutex::new(block_chain))
+    };
 
     let miner_thread = BlockChain::start_miner(
         Arc::clone(&block_chain),
+        storage,
         BATCH_PULLING_SIZE,
         BATCH_PULLING_TIME_FRAME,
     );
@@ -41,10 +53,10 @@ fn main() {
     let tx_chain = Arc::clone(&block_chain);
     thread::spawn(move || loop {
         thread::sleep(time::Duration::from_secs(15));
-        let mut tx_chain = tx_chain.lock().unwrap();
+        let tx_chain = tx_chain.lock().unwrap();
 
         let ran = rand::rng().random();
-        match tx_chain.add_transaction(Transaction::new(
+        match tx_chain.transaction_poll.add_transaction(Transaction::new(
             "Diogo".to_string(),
             "OnlyCavas".to_string(),
             Data { value: ran },

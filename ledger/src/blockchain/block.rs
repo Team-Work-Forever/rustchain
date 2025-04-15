@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use crate::merkle::MerkleTree;
 
-use super::{Transaction, TransactionData};
+use super::{HashFunc, Transaction, TransactionData};
 
 type MerkleRoot = [u8; 32];
 type Hash = [u8; 32];
@@ -60,8 +60,25 @@ where
         }
     }
 
-    pub fn validate(&self, merkle_root: MerkleRoot) -> bool {
-        MerkleTree::from_transactions(self.transactions.clone()).root == merkle_root
+    pub fn validate<THasher>(&self, hasher: THasher, merkle_root: MerkleRoot) -> bool
+    where
+        THasher: HashFunc,
+    {
+        let merkle_tree = MerkleTree::from_transactions(self.transactions.clone());
+
+        if merkle_tree.root != merkle_root {
+            return false;
+        }
+
+        let compute_hash = hasher.hash(format!(
+            "{}{}{}{}",
+            hex::encode(self.prev_hash),
+            hex::encode(self.merkle_root),
+            self.timestamp,
+            self.nonce
+        ));
+
+        compute_hash == self.hash
     }
 }
 
