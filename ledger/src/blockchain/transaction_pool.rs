@@ -1,14 +1,17 @@
 use log::error;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::{
+    collections::VecDeque,
+    sync::{Arc, Mutex, MutexGuard},
+};
 
-use super::{Transaction, TransactionData};
+use super::{block, Transaction, TransactionData};
 
 #[derive(Clone, Debug)]
 pub struct TransactionPool<TData>
 where
     TData: TransactionData,
 {
-    transaction_pool: Arc<Mutex<Vec<Transaction<TData>>>>,
+    transaction_pool: Arc<Mutex<VecDeque<Transaction<TData>>>>,
 }
 
 impl<TData> TransactionPool<TData>
@@ -17,11 +20,11 @@ where
 {
     pub fn new() -> Self {
         Self {
-            transaction_pool: Arc::new(Mutex::new(vec![])),
+            transaction_pool: Arc::new(Mutex::new(VecDeque::new())),
         }
     }
 
-    fn get_lock_pool(&self) -> Result<MutexGuard<Vec<Transaction<TData>>>, ()> {
+    fn get_lock_pool(&self) -> Result<MutexGuard<VecDeque<Transaction<TData>>>, ()> {
         self.transaction_pool
             .lock()
             .map_err(|e| error!("Failed to lock transaction pool {}", e))
@@ -29,7 +32,7 @@ where
 
     pub fn add_transaction(&self, transaction: Transaction<TData>) -> Result<(), ()> {
         let mut pool = self.get_lock_pool()?;
-        pool.push(transaction);
+        pool.push_back(transaction);
 
         Ok(())
     }
@@ -38,7 +41,7 @@ where
         self.get_lock_pool().map_or(true, |p| p.is_empty())
     }
 
-    pub fn arc(&self) -> Arc<Mutex<Vec<Transaction<TData>>>> {
+    pub fn arc(&self) -> Arc<Mutex<VecDeque<Transaction<TData>>>> {
         Arc::clone(&self.transaction_pool)
     }
 
@@ -52,7 +55,7 @@ where
             return Ok(vec![]);
         }
 
-        let end = batch_size.min(pool.len());
+        let end = batch_size.min(block::MAX_TRANSACTION).min(pool.len());
         Ok(pool.drain(0..end).collect::<Vec<_>>())
     }
 }

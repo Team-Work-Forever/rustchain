@@ -10,6 +10,8 @@ use super::{HashFunc, Transaction, TransactionData};
 type MerkleRoot = [u8; 32];
 type Hash = [u8; 32];
 
+pub const MAX_TRANSACTION: usize = 200;
+
 #[derive(Clone, Serialize, Encode, Decode)]
 pub struct Block<TData>
 where
