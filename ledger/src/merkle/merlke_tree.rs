@@ -1,9 +1,8 @@
 use hex;
 use log::info;
-use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::blockchain::Transaction;
+use crate::blockchain::{Transaction, TransactionData};
 
 pub struct MerkleTree {
     pub root: [u8; 32],
@@ -11,7 +10,7 @@ pub struct MerkleTree {
 }
 
 impl MerkleTree {
-    pub fn from_transactions<TData: Serialize>(txs: Vec<Transaction<TData>>) -> Self {
+    pub fn from_transactions<TData: TransactionData>(txs: Vec<Transaction<TData>>) -> Self {
         let leaves = txs
             .iter()
             .map(|transaction| Self::hash(transaction.to_json_string()))

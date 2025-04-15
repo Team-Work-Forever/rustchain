@@ -2,6 +2,9 @@
 .vscode/
 logs/
 
+# block chain binary
+block_chain.bin
+
 # Ignore todo's
 todo.md
 

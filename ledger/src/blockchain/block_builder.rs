@@ -1,18 +1,23 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::{hash_func::HashFunc, Block, Transaction};
+use super::{hash_func::HashFunc, Block, Transaction, TransactionData};
 use crate::merkle::MerkleTree;
-use serde::Serialize;
 
 #[derive(Debug)]
-pub struct BlockBuilder<TData: Serialize> {
+pub struct BlockBuilder<TData>
+where
+    TData: TransactionData,
+{
     index: u64,
     difficulty: u32,
     prev_hash: [u8; 32],
     transactions: Vec<Transaction<TData>>,
 }
 
-impl<TData: Clone + Serialize> BlockBuilder<TData> {
+impl<TData> BlockBuilder<TData>
+where
+    TData: TransactionData,
+{
     pub fn new(index: u64, dificult: u32, prev_hash: [u8; 32]) -> BlockBuilder<TData> {
         BlockBuilder {
             index,

@@ -5,21 +5,31 @@ use std::{
     time::Duration,
 };
 
+use bincode::{Decode, Encode};
 use ledger::{
-    blockchain::{BlockChain, Transaction},
+    blockchain::{BlockChain, Transaction, TransactionData},
     logger,
 };
+
 use log::{error, info};
 use rand::Rng;
+use serde::Serialize;
 
-// Transaction Pool
+// Transaction Poll
 const BATCH_PULLING_SIZE: usize = 5;
 const BATCH_PULLING_TIME_FRAME: Duration = time::Duration::from_secs(2 * 60); // 2 mins
+
+#[derive(Clone, Serialize, Debug, Encode, Decode)]
+struct Data {
+    value: u32,
+}
+
+impl TransactionData for Data {}
 
 fn main() {
     logger::init_logger("info", "logs", "ledger");
 
-    let block_chain: Arc<Mutex<BlockChain<u32>>> = Arc::new(Mutex::new(BlockChain::<u32>::new()));
+    let block_chain = Arc::new(Mutex::new(BlockChain::<Data>::from_bin()));
 
     let miner_thread = BlockChain::start_miner(
         Arc::clone(&block_chain),
@@ -33,19 +43,20 @@ fn main() {
         thread::sleep(time::Duration::from_secs(15));
         let mut tx_chain = tx_chain.lock().unwrap();
 
-        let data = rand::rng().random();
+        let ran = rand::rng().random();
         match tx_chain.add_transaction(Transaction::new(
             "Diogo".to_string(),
             "OnlyCavas".to_string(),
-            data,
+            Data { value: ran },
         )) {
-            Ok(_) => info!("[💰] Added Transaction: {}", data),
+            Ok(_) => info!("[💰] Added Transaction: {:?}", ran),
             Err(_) => error!("Error while submitting transaction"),
         }
     });
 
     // interface
     let print_chain = Arc::clone(&block_chain);
+
     thread::spawn(move || loop {
         thread::sleep(time::Duration::from_secs(20));
 

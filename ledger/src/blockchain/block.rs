@@ -1,16 +1,20 @@
 use std::fmt;
 
+use bincode::{Decode, Encode};
 use serde::Serialize;
 
 use crate::merkle::MerkleTree;
 
-use super::Transaction;
+use super::{Transaction, TransactionData};
 
 type MerkleRoot = [u8; 32];
 type Hash = [u8; 32];
 
-#[derive(Clone, Serialize)]
-pub struct Block<TData: Clone + Serialize> {
+#[derive(Clone, Serialize, Encode, Decode)]
+pub struct Block<TData>
+where
+    TData: TransactionData,
+{
     pub index: u64,
     pub timestamp: u128,
     pub merkle_root: MerkleRoot,
@@ -20,7 +24,10 @@ pub struct Block<TData: Clone + Serialize> {
     transactions: Vec<Transaction<TData>>,
 }
 
-impl<TData: Clone + Serialize> Block<TData> {
+impl<TData> Block<TData>
+where
+    TData: TransactionData,
+{
     pub(crate) fn new(
         index: u64,
         merkle_root: MerkleRoot,
@@ -60,7 +67,7 @@ impl<TData: Clone + Serialize> Block<TData> {
 
 impl<TData> fmt::Debug for Block<TData>
 where
-    TData: Clone + Serialize + fmt::Debug,
+    TData: TransactionData + fmt::Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Block")
