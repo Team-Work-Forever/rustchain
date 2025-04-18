@@ -87,6 +87,7 @@ impl RoutingTable {
 
         closest_nodes
             .into_iter()
+            .filter(|node_distance| node_distance.1.id != node.id)
             .take(count)
             .map(|node_distance| node_distance.1)
             .collect()

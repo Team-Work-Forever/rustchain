@@ -9,7 +9,7 @@ impl NodeId {
     pub fn new(pub_key: &[u8]) -> Self {
         let hasher = Sha256::digest(pub_key);
         let mut id = [0u8; NODE_ID_LENGTH];
-        id.copy_from_slice(&hasher);
+        id.copy_from_slice(&hasher[..NODE_ID_LENGTH]);
 
         NodeId(id)
     }
@@ -26,13 +26,13 @@ impl NodeId {
 
 impl PartialOrd for NodeId {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(other.0.cmp(&self.0))
+        Some(self.0.cmp(&other.0))
     }
 }
 
 impl Ord for NodeId {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        other.0.cmp(&self.0)
+        self.0.cmp(&other.0)
     }
 }
 

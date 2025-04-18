@@ -10,9 +10,7 @@ fn main() {
     kademlia_node.routing_table.insert_node(&node1);
     kademlia_node.routing_table.insert_node(&yet_another_node);
 
-    let nodes = kademlia_node
-        .routing_table
-        .get_closest_nodes(&yet_another_node, 3);
+    let nodes = kademlia_node.routing_table.get_closest_nodes(&node, 3);
 
     println!("{:?}", nodes);
     println!();
