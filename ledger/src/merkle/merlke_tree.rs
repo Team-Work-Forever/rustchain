@@ -22,13 +22,20 @@ impl MerkleTree {
     fn build_tree(mut current_level: Vec<[u8; 32]>) -> Self {
         let mut levels = vec![current_level.clone()];
 
+        if current_level.is_empty() {
+            return MerkleTree {
+                root: [0u8; 32],
+                levels: vec![],
+            };
+        }
+
         while current_level.len() > 1 {
             current_level = Self::next_level(&current_level);
             levels.push(current_level.clone());
         }
 
         MerkleTree {
-            root: current_level[0].clone(),
+            root: current_level[0],
             levels,
         }
     }

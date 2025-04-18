@@ -7,7 +7,7 @@ use std::{
 
 use bincode::{Decode, Encode};
 use ledger::{
-    blockchain::{BlockChain, Transaction, TransactionData},
+    blockchain::{BlockChain, DoubleHasher, Transaction, TransactionData},
     logger,
     store::{BlockChainStorage, InFileStorage},
 };
@@ -35,8 +35,8 @@ fn main() {
     let storage = Arc::new(InFileStorage::new());
     let block_chain = {
         let block_chain = match storage.load() {
-            Ok(chain) => chain,
-            Err(_) => BlockChain::<Data>::new(),
+            Ok(chain) if chain.validate(DoubleHasher {}) => chain,
+            _ => BlockChain::<Data>::new(),
         };
 
         Arc::new(Mutex::new(block_chain))
