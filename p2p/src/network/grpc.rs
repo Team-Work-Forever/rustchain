@@ -11,7 +11,7 @@ use tonic::{
 };
 
 use crate::{
-    kademlia::{network::GrpcNetwork, RoutingTable},
+    kademlia::{dht::KademliaData, network::GrpcNetwork, RoutingTable},
     Node,
 };
 
@@ -28,10 +28,10 @@ pub enum NetWorkError {
     FailToEstablishConnection,
 }
 
-impl GrpcNetwork {
+impl<TData: KademliaData> GrpcNetwork<TData> {
     pub async fn start_network(
         node: Node,
-        routing_table: Arc<Mutex<RoutingTable>>,
+        routing_table: Arc<Mutex<RoutingTable<TData>>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let grpc_kademlia = GrpcNetwork::new(node.clone(), routing_table.clone());
 

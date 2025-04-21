@@ -11,29 +11,29 @@ use crate::{
     },
 };
 
-use super::{Node, RoutingTable, KBUCKET_MAX};
+use super::{dht::KademliaData, Node, RoutingTable, KBUCKET_MAX};
 
 #[derive(Debug)]
-pub struct GrpcNetwork {
+pub struct GrpcNetwork<TData: KademliaData> {
     pub(crate) node: Node,
-    pub(crate) routing_table: Arc<Mutex<RoutingTable>>,
+    pub(crate) routing_table: Arc<Mutex<RoutingTable<TData>>>,
 }
 
-impl GrpcNetwork {
-    pub fn new(node: Node, routing_table: Arc<Mutex<RoutingTable>>) -> Self {
+impl<TData: KademliaData> GrpcNetwork<TData> {
+    pub fn new(node: Node, routing_table: Arc<Mutex<RoutingTable<TData>>>) -> Self {
         Self {
             node,
             routing_table,
         }
     }
 
-    async fn get_routing_table(&self) -> MutexGuard<RoutingTable> {
+    async fn get_routing_table(&self) -> MutexGuard<RoutingTable<TData>> {
         self.routing_table.lock().await
     }
 }
 
 #[tonic::async_trait]
-impl KademliaService for GrpcNetwork {
+impl<TData: KademliaData> KademliaService for GrpcNetwork<TData> {
     async fn ping(
         &self,
         request: tonic::Request<PingRequest>,
