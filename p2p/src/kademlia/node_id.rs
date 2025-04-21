@@ -1,6 +1,6 @@
 use sha2::{Digest, Sha256};
 
-use super::NODE_ID_LENGTH;
+use super::{distance::Distance, NODE_ID_LENGTH};
 
 #[derive(Clone, Hash, PartialEq, Eq)]
 pub struct NodeId(pub [u8; NODE_ID_LENGTH]);
@@ -14,13 +14,13 @@ impl NodeId {
         NodeId(id)
     }
 
-    pub fn distance(&self, node: &NodeId) -> NodeId {
+    pub fn distance(&self, node: &NodeId) -> Distance {
         let mut distance = [0; NODE_ID_LENGTH];
         for i in 0..NODE_ID_LENGTH {
             distance[i] = self.0[i] ^ node.0[i];
         }
 
-        NodeId(distance)
+        Distance(distance)
     }
 }
 
@@ -41,5 +41,31 @@ impl std::fmt::Debug for NodeId {
         f.debug_tuple("NodeId")
             .field(&hex::encode(&self.0))
             .finish()
+    }
+}
+
+impl PartialEq<Vec<u8>> for NodeId {
+    fn eq(&self, other: &Vec<u8>) -> bool {
+        &self.0[..] == &other[..]
+    }
+}
+
+impl TryFrom<Vec<u8>> for NodeId {
+    type Error = &'static str;
+
+    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        if value.len() != NODE_ID_LENGTH {
+            return Err("Invalid length for NodeId");
+        }
+
+        let mut id = [0u8; NODE_ID_LENGTH];
+        id.copy_from_slice(&value[..]);
+        Ok(NodeId(id))
+    }
+}
+
+impl From<NodeId> for Vec<u8> {
+    fn from(value: NodeId) -> Self {
+        value.0.to_vec()
     }
 }

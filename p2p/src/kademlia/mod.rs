@@ -1,8 +1,11 @@
 pub mod dht;
+pub mod distance;
 pub mod k_bucket;
+pub mod network;
 pub mod node;
 pub mod node_id;
 pub mod routing_table;
+pub mod secret_key;
 
 const NODE_ID_LENGTH: usize = 32;
 const NODE_ID_BITS: usize = NODE_ID_LENGTH * 8;

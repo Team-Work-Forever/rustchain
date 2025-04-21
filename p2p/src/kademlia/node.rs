@@ -1,48 +1,59 @@
-use sha2::{Digest, Sha256};
+use std::net::SocketAddr;
 
-use super::{NodeId, NODE_ID_LENGTH};
+use crate::network::grpc::proto::NodeInfo;
 
-#[derive(Clone, Debug)]
+use super::{secret_key::SecretPair, NodeId, NODE_ID_LENGTH};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Node {
     pub id: NodeId,
+    pub keys: SecretPair,
 
-    pub address: String,
-    pub port: u16,
+    address: String,
+    port: usize,
+}
+
+impl Into<NodeInfo> for Node {
+    fn into(self) -> NodeInfo {
+        NodeInfo {
+            id: self.id.into(),
+            addr: self.address,
+            port: self.port as u64,
+            pub_key: self.keys.public_key.into(),
+        }
+    }
 }
 
 impl Node {
-    pub fn new(address: String, port: u16) -> Self {
-        Self {
-            id: NodeId::new(&[0u8; NODE_ID_LENGTH]),
-            address,
-            port,
-        }
-    }
-    pub fn yet_another_new(address: String, port: u16) -> Self {
-        Self {
-            id: NodeId::new(&[1u8; NODE_ID_LENGTH]),
-            address,
-            port,
-        }
-    }
-    pub fn test(address: String, port: u16) -> Self {
-        let first = Sha256::digest("another way, that does not matter right now");
-        let oi: [u8; 32] = Sha256::digest(first).try_into().expect("Cannot Hash value");
+    pub fn from(node: NodeInfo) -> Option<Self> {
+        let public_key = node
+            .pub_key
+            .try_into()
+            .expect("Failed to convert to slice bytes");
 
-        Self {
-            id: NodeId::new(&oi),
-            address,
-            port,
-        }
+        Some(Self {
+            id: node.id.try_into().unwrap(),
+            keys: SecretPair::default(public_key),
+            address: node.addr,
+            port: node.port as usize,
+        })
     }
-    pub fn ed(address: String, port: u16) -> Self {
-        let first = Sha256::digest("perfect");
-        let oi: [u8; 32] = Sha256::digest(first).try_into().expect("Cannot Hash value");
 
-        Self {
-            id: NodeId::new(&oi),
+    pub fn new(address: String, port: usize) -> Option<Self> {
+        let Ok(keys) = SecretPair::generate_keys() else {
+            return None;
+        };
+
+        Some(Self {
+            id: NodeId::new(&keys.public_key[..NODE_ID_LENGTH]),
+            keys,
             address,
             port,
-        }
+        })
+    }
+
+    pub fn get_addr(&self) -> Result<SocketAddr, Box<dyn std::error::Error>> {
+        let addr: SocketAddr = format!("{}:{}", self.address, self.port).parse()?;
+        Ok(addr)
     }
 }

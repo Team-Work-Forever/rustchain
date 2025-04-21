@@ -30,6 +30,15 @@ impl KBucket {
         self.nodes.pop_front();
         self.insert(node);
     }
+    pub fn remove(&mut self, node: Node) {
+        if let Some(pos) = self.nodes.iter().position(|n| n.id == node.id) {
+            self.nodes.remove(pos);
+        }
+    }
+
+    pub fn get_first_node(&self) -> Option<Node> {
+        self.nodes.get(0).cloned()
+    }
 
     pub fn get_oldest_node(&self) -> Option<Node> {
         self.nodes.front().cloned()
