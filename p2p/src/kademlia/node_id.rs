@@ -1,3 +1,4 @@
+use rand::{rngs::OsRng, TryRngCore};
 use sha2::{Digest, Sha256};
 
 use super::{distance::Distance, NODE_ID_LENGTH};
@@ -12,6 +13,15 @@ impl NodeId {
         id.copy_from_slice(&hasher[..NODE_ID_LENGTH]);
 
         NodeId(id)
+    }
+
+    pub fn random() -> Option<Self> {
+        let mut secret_bytes = [0u8; 32];
+        if let Err(_) = OsRng.try_fill_bytes(&mut secret_bytes) {
+            return None;
+        }
+
+        Some(NodeId(secret_bytes))
     }
 
     pub fn distance(&self, node: &NodeId) -> Distance {

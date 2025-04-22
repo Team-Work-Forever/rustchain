@@ -1,14 +1,19 @@
-use bincode::Encode;
-use p2p::{kademlia::dht::KademliaData, DHTNode};
+use bincode::{Decode, Encode};
+use p2p::{
+    kademlia::{dht::KademliaData, NodeId},
+    DHTNode,
+};
 
-// Connect to network
-// 1. Add bootstrap to my routing table
-// 2. FIND_NODE to my self, in order to trigger the ns_look_up on bootstrap
-// 3. (FIND_NODE) returns all it's closest nodes
-// 4. I add those to my list!
+#[derive(Clone, Encode, Debug, Decode)]
+struct MyData {
+    pub name: String,
+}
 
-#[derive(Clone, Encode, Debug)]
-struct MyData {}
+impl MyData {
+    pub fn new(name: String) -> Self {
+        Self { name }
+    }
+}
 
 impl KademliaData for MyData {}
 
@@ -26,16 +31,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .expect("Error creating node 2");
 
-    match DHTNode::<MyData>::ping(&node1.core, &node2.core).await {
-        Ok(_) => print!("They speak!"),
-        Err(_) => panic!("Well they tried..."),
+    let Some(store_key) = NodeId::random() else {
+        panic!("deu merda");
+    };
+
+    let value_store = MyData::new("Diogo Assunção".into());
+    if let Err(_) = node1.store(&store_key, value_store).await {
+        panic!("deu ainda mais merda");
+    };
+
+    if let Ok(Some(value)) = node2.find_value(&store_key).await {
+        println!("My data is something like: {}, ain't ya ;)", value.name);
     }
 
+    println!();
     println!("Node 1");
-    println!("{:?}", node1.routing_table);
+    println!("{:?}", node1.distributed_hash_tb);
     println!();
     println!("Node 2");
-    println!("{:?}", node2.routing_table);
+    println!("{:?}", node2.distributed_hash_tb);
 
     Ok(())
 }

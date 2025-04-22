@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use proto::{
     kademlia_service_client::KademliaServiceClient, kademlia_service_server::KademliaServiceServer,
@@ -11,7 +11,7 @@ use tonic::{
 };
 
 use crate::{
-    kademlia::{dht::KademliaData, network::GrpcNetwork, RoutingTable},
+    kademlia::{dht::KademliaData, network::GrpcNetwork, NodeId, RoutingTable},
     Node,
 };
 
@@ -32,8 +32,10 @@ impl<TData: KademliaData> GrpcNetwork<TData> {
     pub async fn start_network(
         node: Node,
         routing_table: Arc<Mutex<RoutingTable<TData>>>,
+        distributed_hash_table: Arc<Mutex<HashMap<NodeId, TData>>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let grpc_kademlia = GrpcNetwork::new(node.clone(), routing_table.clone());
+        let grpc_kademlia =
+            GrpcNetwork::new(node.clone(), routing_table.clone(), distributed_hash_table);
 
         let node_addr = node.get_addr()?;
 
