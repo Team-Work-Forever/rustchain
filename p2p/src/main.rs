@@ -32,12 +32,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Error creating node 2");
 
     let Some(store_key) = NodeId::random() else {
-        panic!("deu merda");
+        panic!("Failed to create key");
     };
 
     let value_store = MyData::new("Diogo Assunção".into());
     if let Err(_) = node1.store(&store_key, value_store).await {
-        panic!("deu ainda mais merda");
+        panic!("Failed to propagate value thru network");
     };
 
     if let Ok(Some(value)) = node2.find_value(&store_key).await {

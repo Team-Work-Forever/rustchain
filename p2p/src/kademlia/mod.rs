@@ -1,5 +1,4 @@
 pub mod dht;
-// pub mod dht_data;
 pub mod distance;
 pub mod k_bucket;
 pub mod network;
