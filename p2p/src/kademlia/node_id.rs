@@ -24,7 +24,7 @@ impl NodeId {
         Some(NodeId(secret_bytes))
     }
 
-    pub fn distance(&self, node: &NodeId) -> Distance {
+    pub(crate) fn distance(&self, node: &NodeId) -> Distance {
         let mut distance = [0; NODE_ID_LENGTH];
         for i in 0..NODE_ID_LENGTH {
             distance[i] = self.0[i] ^ node.0[i];

@@ -12,10 +12,10 @@ use crate::{
     },
 };
 
-use super::{dht::KademliaData, Node, RoutingTable, KBUCKET_MAX};
+use super::{dht::KademliaData, routing_table::RoutingTable, Node, KBUCKET_MAX};
 
 #[derive(Debug)]
-pub struct GrpcNetwork<TData: KademliaData> {
+pub(crate) struct GrpcNetwork<TData: KademliaData> {
     pub(crate) node: Node,
     pub(crate) routing_table: Arc<Mutex<RoutingTable<TData>>>,
     pub(crate) distributed_hashing_table: Arc<Mutex<HashMap<NodeId, TData>>>,

@@ -1,7 +1,7 @@
 use super::{Node, NODE_ID_LENGTH};
 
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct Distance(pub [u8; NODE_ID_LENGTH]);
+pub(crate) struct Distance(pub [u8; NODE_ID_LENGTH]);
 
 impl std::fmt::Debug for Distance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -12,7 +12,7 @@ impl std::fmt::Debug for Distance {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct NodeDistance(pub Distance, pub Node);
+pub(crate) struct NodeDistance(pub Distance, pub Node);
 
 impl Ord for NodeDistance {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {

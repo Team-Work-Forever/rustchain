@@ -12,7 +12,8 @@ use crate::network::grpc::proto::{
 };
 
 use super::{
-    distance::NodeDistance, network::GrpcNetwork, Node, NodeId, RoutingTable, KBUCKET_MAX,
+    distance::NodeDistance, network::GrpcNetwork, routing_table::RoutingTable, Node, NodeId,
+    KBUCKET_MAX,
 };
 
 pub trait KademliaData: Encode + Send + Decode<()> + 'static {}

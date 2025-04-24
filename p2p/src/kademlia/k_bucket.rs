@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use super::{Node, NodeId};
 
 #[derive(Clone, Debug)]
-pub struct KBucket {
+pub(crate) struct KBucket {
     nodes: VecDeque<Node>,
     bucket_size: usize,
     pub depth: usize,
@@ -30,6 +30,7 @@ impl KBucket {
         self.nodes.pop_front();
         self.insert(node);
     }
+
     pub fn remove(&mut self, node: Node) {
         if let Some(pos) = self.nodes.iter().position(|n| n.id == node.id) {
             self.nodes.remove(pos);

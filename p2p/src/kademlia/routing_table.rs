@@ -3,8 +3,8 @@ use std::marker::PhantomData;
 use crate::DHTNode;
 
 use super::{
-    dht::KademliaData, distance::NodeDistance, KBucket, Node, NodeId, KBUCKET_MAX, NODE_ID_BITS,
-    NODE_ID_LENGTH,
+    dht::KademliaData, distance::NodeDistance, k_bucket::KBucket, Node, NodeId, KBUCKET_MAX,
+    NODE_ID_BITS, NODE_ID_LENGTH,
 };
 
 #[derive(Clone, Debug)]
@@ -52,7 +52,7 @@ impl<TData: KademliaData> RoutingTable<TData> {
         NODE_ID_LENGTH - 1
     }
 
-    pub async fn insert_node(&mut self, node: &Node) {
+    pub(crate) async fn insert_node(&mut self, node: &Node) {
         let kbucket_index = self.get_bucket_index(node.clone());
 
         let Some(kbucket) = self.kbuckets.get_mut(kbucket_index) else {
@@ -81,7 +81,7 @@ impl<TData: KademliaData> RoutingTable<TData> {
         kbucket.envict_and_insert(node.clone());
     }
 
-    pub fn remove(&mut self, node: &Node) {
+    pub(crate) fn remove(&mut self, node: &Node) {
         let node_clone = node.clone();
         let kbucket_index = self.get_bucket_index(node_clone);
 
@@ -92,7 +92,7 @@ impl<TData: KademliaData> RoutingTable<TData> {
         kbucket.remove(node.clone());
     }
 
-    pub fn get_closest_nodes(&self, key: &NodeId, count: usize) -> Vec<NodeDistance> {
+    pub(crate) fn get_closest_nodes(&self, key: &NodeId, count: usize) -> Vec<NodeDistance> {
         let mut distances = self
             .kbuckets
             .iter()
