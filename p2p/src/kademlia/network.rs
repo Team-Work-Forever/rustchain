@@ -15,17 +15,17 @@ use crate::{
 use super::{dht::KademliaData, routing_table::RoutingTable, Node, KBUCKET_MAX};
 
 #[derive(Debug)]
-pub(crate) struct GrpcNetwork<TData: KademliaData> {
+pub(crate) struct GrpcNetwork {
     pub(crate) node: Node,
-    pub(crate) routing_table: Arc<Mutex<RoutingTable<TData>>>,
-    pub(crate) distributed_hashing_table: Arc<Mutex<HashMap<NodeId, TData>>>,
+    pub(crate) routing_table: Arc<Mutex<RoutingTable>>,
+    pub(crate) distributed_hashing_table: Arc<Mutex<HashMap<NodeId, Box<dyn KademliaData>>>>,
 }
 
-impl<TData: KademliaData> GrpcNetwork<TData> {
+impl GrpcNetwork {
     pub fn new(
         node: Node,
-        routing_table: Arc<Mutex<RoutingTable<TData>>>,
-        distributed_hashing_table: Arc<Mutex<HashMap<NodeId, TData>>>,
+        routing_table: Arc<Mutex<RoutingTable>>,
+        distributed_hashing_table: Arc<Mutex<HashMap<NodeId, Box<dyn KademliaData>>>>,
     ) -> Self {
         Self {
             node,
@@ -34,18 +34,18 @@ impl<TData: KademliaData> GrpcNetwork<TData> {
         }
     }
 
-    async fn get_routing_table(&self) -> MutexGuard<RoutingTable<TData>> {
+    async fn get_routing_table(&self) -> MutexGuard<RoutingTable> {
         self.routing_table.lock().await
     }
 
-    async fn get_distributed_table(&self) -> MutexGuard<HashMap<NodeId, TData>> {
+    async fn get_distributed_table(&self) -> MutexGuard<HashMap<NodeId, Box<dyn KademliaData>>> {
         self.distributed_hashing_table.lock().await
     }
 
     async fn persist_incoming_node<TRequest>(
         &self,
         request: &Request<TRequest>,
-    ) -> Result<MutexGuard<RoutingTable<TData>>, Status> {
+    ) -> Result<MutexGuard<RoutingTable>, Status> {
         let mut routing_table = self.get_routing_table().await;
         let incoming_node = self.get_peer(&request)?;
 
@@ -55,7 +55,7 @@ impl<TData: KademliaData> GrpcNetwork<TData> {
 }
 
 #[tonic::async_trait]
-impl<TData: KademliaData> KademliaService for GrpcNetwork<TData> {
+impl KademliaService for GrpcNetwork {
     async fn ping(
         &self,
         request: tonic::Request<PingRequest>,
@@ -79,7 +79,8 @@ impl<TData: KademliaData> KademliaService for GrpcNetwork<TData> {
             .map_err(|e| tonic::Status::invalid_argument(format!("Invalid node ID: {}", e)))?;
 
         let config = bincode::config::standard();
-        let Ok((decoded_value, _)) = bincode::decode_from_slice(&request.value, config) else {
+        let Ok((decoded_value, _)) = bincode::serde::decode_from_slice(&request.value, config)
+        else {
             return Err(tonic::Status::aborted("Failed to decode value"));
         };
 
@@ -131,7 +132,7 @@ impl<TData: KademliaData> KademliaService for GrpcNetwork<TData> {
 
         if let Some(value) = dht.get(&key) {
             let config = bincode::config::standard();
-            let Ok(encoded_data) = bincode::encode_to_vec(&value, config) else {
+            let Ok(encoded_data) = bincode::serde::encode_to_vec(&value, config) else {
                 return Err(Status::aborted("Failed to return value"));
             };
 

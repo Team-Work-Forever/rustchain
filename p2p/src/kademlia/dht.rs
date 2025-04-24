@@ -1,9 +1,10 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    fmt::Debug,
     sync::Arc,
 };
 
-use bincode::{Decode, Encode};
+use serde::Deserialize;
 use thiserror::Error;
 use tokio::sync::{Mutex, MutexGuard};
 
@@ -16,7 +17,8 @@ use super::{
     KBUCKET_MAX,
 };
 
-pub trait KademliaData: Encode + Send + Decode<()> + 'static {}
+#[typetag::serde]
+pub trait KademliaData: erased_serde::Serialize + Debug + Send + Sync + 'static {}
 
 #[derive(Debug, Error)]
 pub enum KademliaError {
@@ -37,17 +39,14 @@ pub enum KademliaError {
 }
 
 #[derive(Debug, Clone)]
-pub struct DHTNode<TData>
-where
-    TData: KademliaData,
-{
+pub struct DHTNode {
     pub core: Node,
 
-    pub routing_table: Arc<Mutex<RoutingTable<TData>>>,
-    pub distributed_hash_tb: Arc<Mutex<HashMap<NodeId, TData>>>,
+    pub routing_table: Arc<Mutex<RoutingTable>>,
+    pub distributed_hash_tb: Arc<Mutex<HashMap<NodeId, Box<dyn KademliaData>>>>,
 }
 
-impl<TData: KademliaData> DHTNode<TData> {
+impl DHTNode {
     pub async fn bootstrap(address: String, port: usize) -> Option<Self> {
         let Some(node) = Node::new(address, port) else {
             return None;
@@ -86,11 +85,11 @@ impl<TData: KademliaData> DHTNode<TData> {
         Some(boot_node)
     }
 
-    async fn get_routing_table(&self) -> MutexGuard<RoutingTable<TData>> {
+    async fn get_routing_table(&self) -> MutexGuard<RoutingTable> {
         self.routing_table.lock().await
     }
 
-    async fn get_dth_table(&self) -> MutexGuard<HashMap<NodeId, TData>> {
+    async fn get_dth_table(&self) -> MutexGuard<HashMap<NodeId, Box<dyn KademliaData>>> {
         self.distributed_hash_tb.lock().await
     }
 
@@ -112,7 +111,7 @@ impl<TData: KademliaData> DHTNode<TData> {
     }
 
     pub async fn ping(host: &Node, target: &Node) -> Result<(), KademliaError> {
-        let mut client = GrpcNetwork::<TData>::connect_over(host.clone(), target.clone())
+        let mut client = GrpcNetwork::connect_over(host.clone(), target.clone())
             .await
             .map_err(|e| {
                 println!("{}", e);
@@ -137,19 +136,22 @@ impl<TData: KademliaData> DHTNode<TData> {
         Ok(())
     }
 
-    pub async fn store(&self, key: &NodeId, value: TData) -> Result<(), KademliaError> {
+    pub async fn store(
+        &self,
+        key: &NodeId,
+        value: Box<dyn KademliaData>,
+    ) -> Result<(), KademliaError> {
         let mut has_stored = false;
 
         let closest_nodes = self.node_lookup(key).await?;
 
         let config = bincode::config::standard();
-        let Ok(encoded_data) = bincode::encode_to_vec(&value, config) else {
+        let Ok(encoded_data) = bincode::serde::encode_to_vec(&value, config) else {
             return Err(KademliaError::StoreFailedError);
         };
 
         for node in closest_nodes.clone() {
-            let Ok(mut client) =
-                GrpcNetwork::<TData>::connect_over(self.core.clone(), node.clone()).await
+            let Ok(mut client) = GrpcNetwork::connect_over(self.core.clone(), node.clone()).await
             else {
                 continue;
             };
@@ -176,6 +178,7 @@ impl<TData: KademliaData> DHTNode<TData> {
 
         if closest_nodes.iter().any(|n| n.id == self.core.id) {
             self.get_dth_table().await.insert(key.clone(), value);
+
             has_stored = true;
         }
 
@@ -203,7 +206,7 @@ impl<TData: KademliaData> DHTNode<TData> {
             }
 
             let Ok(target_closest_nodes) =
-                DHTNode::<TData>::find_node(&self.core, &current_node, target_id).await
+                DHTNode::find_node(&self.core, &current_node, target_id).await
             else {
                 continue;
             };
@@ -231,7 +234,7 @@ impl<TData: KademliaData> DHTNode<TData> {
         target: &Node,
         lookup_id: &NodeId,
     ) -> Result<Vec<Node>, Box<KademliaError>> {
-        let mut client = GrpcNetwork::<TData>::connect_over(host.clone(), target.clone())
+        let mut client = GrpcNetwork::connect_over(host.clone(), target.clone())
             .await
             .map_err(|_| KademliaError::FindNodeFailedError)?;
 
@@ -253,7 +256,10 @@ impl<TData: KademliaData> DHTNode<TData> {
         Ok(nodes)
     }
 
-    pub async fn find_value(&self, key: &NodeId) -> Result<Option<TData>, KademliaError> {
+    pub async fn find_value<TData>(&self, key: &NodeId) -> Result<Option<TData>, KademliaError>
+    where
+        TData: KademliaData + for<'de> Deserialize<'de>,
+    {
         let routing_table = self.get_routing_table().await;
 
         // self, search for the value first!
@@ -267,7 +273,7 @@ impl<TData: KademliaData> DHTNode<TData> {
             }
 
             let Ok(mut client) =
-                GrpcNetwork::<TData>::connect_over(self.core.clone(), current_node.clone()).await
+                GrpcNetwork::connect_over(self.core.clone(), current_node.clone()).await
             else {
                 continue;
             };
@@ -300,7 +306,8 @@ impl<TData: KademliaData> DHTNode<TData> {
                 Some(Resp::Value(value)) => {
                     let config = bincode::config::standard();
 
-                    let Ok((decoded_value, _)) = bincode::decode_from_slice(&value, config) else {
+                    let Ok((decoded_value, _)) = bincode::serde::decode_from_slice(&value, config)
+                    else {
                         return Err(KademliaError::FindValueFailedError);
                     };
 

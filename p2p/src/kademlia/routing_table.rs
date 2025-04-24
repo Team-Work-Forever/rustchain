@@ -1,27 +1,23 @@
-use std::marker::PhantomData;
-
 use crate::DHTNode;
 
 use super::{
-    dht::KademliaData, distance::NodeDistance, k_bucket::KBucket, Node, NodeId, KBUCKET_MAX,
-    NODE_ID_BITS, NODE_ID_LENGTH,
+    distance::NodeDistance, k_bucket::KBucket, Node, NodeId, KBUCKET_MAX, NODE_ID_BITS,
+    NODE_ID_LENGTH,
 };
 
 #[derive(Clone, Debug)]
-pub struct RoutingTable<TData: KademliaData> {
+pub struct RoutingTable {
     host: Node,
     kbuckets: Vec<KBucket>,
-    _phatom: PhantomData<TData>,
 }
 
-impl<TData: KademliaData> RoutingTable<TData> {
+impl RoutingTable {
     pub async fn new(node: Node) -> Self {
         let kbuckets = Self::gen_kbuckets();
 
         let mut routing_table = Self {
             host: node.clone(),
             kbuckets,
-            _phatom: PhantomData::default(),
         };
 
         routing_table.insert_node(&node).await;
@@ -74,7 +70,7 @@ impl<TData: KademliaData> RoutingTable<TData> {
 
         let oldest_node = kbucket.get_oldest_node().expect("");
 
-        let Err(_) = DHTNode::<TData>::ping(&self.host, &oldest_node).await else {
+        let Err(_) = DHTNode::ping(&self.host, &oldest_node).await else {
             return;
         };
 

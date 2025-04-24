@@ -28,11 +28,11 @@ pub enum NetWorkError {
     FailToEstablishConnection,
 }
 
-impl<TData: KademliaData> GrpcNetwork<TData> {
+impl GrpcNetwork {
     pub async fn start_network(
         node: Node,
-        routing_table: Arc<Mutex<RoutingTable<TData>>>,
-        distributed_hash_table: Arc<Mutex<HashMap<NodeId, TData>>>,
+        routing_table: Arc<Mutex<RoutingTable>>,
+        distributed_hash_table: Arc<Mutex<HashMap<NodeId, Box<dyn KademliaData>>>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let grpc_kademlia =
             GrpcNetwork::new(node.clone(), routing_table.clone(), distributed_hash_table);

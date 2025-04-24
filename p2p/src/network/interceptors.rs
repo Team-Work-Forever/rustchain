@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use tonic::{metadata::MetadataValue, Request, Status};
 
 use crate::{
-    kademlia::{dht::KademliaData, network::GrpcNetwork, NodeId},
+    kademlia::{network::GrpcNetwork, NodeId},
     Node,
 };
 
@@ -12,7 +12,7 @@ use super::grpc::proto::NodeInfo;
 pub(crate) const PUB_KEY_METADATA: &str = "x-pubkey";
 pub(crate) const ADDR_KEY_METADATA: &str = "x-addr";
 
-impl<TData: KademliaData> GrpcNetwork<TData> {
+impl GrpcNetwork {
     pub(crate) fn get_peer<TRequest>(
         &self,
         request: &tonic::Request<TRequest>,
