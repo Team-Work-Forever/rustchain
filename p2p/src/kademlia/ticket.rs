@@ -10,22 +10,28 @@ use super::{network::GrpcNetwork, Node};
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NodeTicket {
-    pow: [u8; 32],
-    nonce: u32,
+    pub pow: [u8; 32],
+    pub challange: u32,
+    pub nonce: u32,
 }
 
 impl std::fmt::Debug for NodeTicket {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NodeTicket")
             .field("pow", &hex::encode(&self.pow))
+            .field("challange", &self.challange)
             .field("nonce", &self.nonce)
             .finish()
     }
 }
 
 impl NodeTicket {
-    fn new(pow: [u8; 32], nonce: u32) -> Self {
-        Self { pow, nonce }
+    fn new(pow: [u8; 32], challange: u32, nonce: u32) -> Self {
+        Self {
+            pow,
+            challange,
+            nonce,
+        }
     }
 
     pub fn calculate_pow(
@@ -105,7 +111,7 @@ impl NodeTicket {
             DoubleHasher::default(),
         );
 
-        Some(NodeTicket::new(pow, nonce))
+        Some(NodeTicket::new(pow, response.challange, nonce))
     }
 
     pub async fn submit_challange(&self, host: &mut Node, bootstrap: &Node) -> Option<()> {

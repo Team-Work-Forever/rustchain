@@ -38,7 +38,7 @@ impl GrpcNetwork {
         routing_table: Arc<Mutex<RoutingTable>>,
         distributed_hash_table: Arc<Mutex<HashMap<NodeId, Box<dyn KademliaData>>>>,
         event_bus: Arc<dyn DHTEventHandler>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), NetWorkError> {
         let grpc_kademlia = GrpcNetwork::new(
             node.clone(),
             routing_table.clone(),
@@ -46,13 +46,19 @@ impl GrpcNetwork {
             event_bus,
         );
 
-        let node_addr = node.get_addr()?;
+        let node_addr = node
+            .get_addr()
+            .map_err(|_| NetWorkError::FailToEstablishConnection)?;
 
         Server::builder()
-            .add_service(KademliaServiceServer::new(grpc_kademlia.clone()))
+            .add_service(KademliaServiceServer::with_interceptor(
+                grpc_kademlia.clone(),
+                Self::verify_sybil_attack,
+            ))
             .add_service(JoinServiceServer::new(grpc_kademlia))
             .serve(node_addr)
-            .await?;
+            .await
+            .map_err(|_| NetWorkError::FailToEstablishConnection)?;
 
         Ok(())
     }
@@ -96,9 +102,13 @@ impl GrpcNetwork {
             .await
             .map_err(|_| NetWorkError::FailToEstablishConnection)?;
 
+        let Some(ticket) = host.ticket else {
+            return Err(NetWorkError::FailToEstablishConnection);
+        };
+
         let client = KademliaServiceClient::with_interceptor(
             channel,
-            Self::add_pubkey_interceptor(host.keys.public_key, host_addr),
+            Self::add_pubkey_interceptor(host.keys.public_key, ticket, host_addr),
         );
 
         Ok(client)
