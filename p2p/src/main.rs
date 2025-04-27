@@ -29,9 +29,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         panic!("Error creating bootstrap");
     };
 
-    println!("Block chain: {:#?}", bootstrap.block_chain);
-    println!("DHT: {:#?}", bootstrap.kademlia_net);
-
     let Ok(conn) = bootstrap.get_connection() else {
         panic!("Error fetching pub key");
     };
@@ -48,7 +45,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         panic!("Error creating node1");
     };
 
-    let Some(_node2) = NetworkNode::new(NetworkMode::Join {
+    println!(
+        "Ticket: {:#?}",
+        node1.kademlia_net.lock().unwrap().core.ticket
+    );
+
+    let Some(node2) = NetworkNode::new(NetworkMode::Join {
         bootstraps: bootstrap_list,
         host: "127.0.0.1".into(),
         port: 4001,
@@ -58,12 +60,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         panic!("Error creating node2");
     };
 
+    println!(
+        "Ticket: {:#?}",
+        node2.kademlia_net.lock().unwrap().core.ticket
+    );
+
     let Some(store_id) = p2p::kademlia::NodeId::random() else {
         panic!("Ardeu!")
     };
 
     let _ = node1
         .kademlia_net
+        .lock()
+        .unwrap()
         .store(&store_id, Box::new(KData::new("Diogo Assunção".into())))
         .await;
 

@@ -31,7 +31,7 @@ pub enum NetworkMode {
 #[derive(Debug)]
 pub struct NetworkNode {
     pub block_chain: Arc<Mutex<BlockChain>>,
-    pub kademlia_net: Arc<DHTNode>,
+    pub kademlia_net: Arc<Mutex<DHTNode>>,
 }
 
 impl NetworkNode {
@@ -42,7 +42,7 @@ impl NetworkNode {
     ) -> Option<Arc<Self>> {
         let block_chain = Arc::new(Mutex::new(block_chain));
 
-        let dht = Arc::new(dht);
+        let dht = Arc::new(Mutex::new(dht));
         let network_node = Self {
             block_chain,
             kademlia_net: dht.clone(),
@@ -57,7 +57,12 @@ impl NetworkNode {
                     return None;
                 };
 
-                if let None = dht.join_network(bootstrap).await {
+                if let None = dht
+                    .lock()
+                    .expect("Tried to unlock dht")
+                    .join_network(bootstrap)
+                    .await
+                {
                     return None;
                 }
             }
@@ -82,7 +87,10 @@ impl NetworkNode {
     }
 
     pub(crate) fn connect(self: Arc<Self>) {
-        self.kademlia_net.init_grpc_connection(self.clone());
+        self.kademlia_net
+            .lock()
+            .expect("Tried to unlock dht")
+            .init_grpc_connection(self.clone());
 
         BlockChain::start_miner(
             self.block_chain.clone(),
@@ -93,8 +101,10 @@ impl NetworkNode {
     }
 
     pub fn get_connection(&self) -> Result<Node, Box<dyn Error + '_>> {
-        let public_key = self.kademlia_net.core.keys.public_key;
-        let addr = self.kademlia_net.core.get_addr()?;
+        let kademlia = self.kademlia_net.lock()?;
+
+        let public_key = kademlia.core.keys.public_key;
+        let addr = kademlia.core.get_addr()?;
 
         Ok(Node::from_pub_key(
             &public_key,

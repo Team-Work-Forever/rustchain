@@ -4,12 +4,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::network::grpc::proto::NodeInfo;
 
-use super::{secret_key::SecretPair, NodeId, NODE_ID_LENGTH};
+use super::{secret_key::SecretPair, ticket::NodeTicket, NodeId, NODE_ID_LENGTH};
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct Node {
     pub id: NodeId,
     pub keys: SecretPair,
+    pub ticket: Option<NodeTicket>,
 
     #[serde(skip)]
     address: String,
@@ -41,6 +42,7 @@ impl Node {
             keys: SecretPair::default(public_key),
             address: node.addr,
             port: node.port as usize,
+            ticket: None,
         })
     }
 
@@ -50,6 +52,7 @@ impl Node {
             keys: SecretPair::default(*pub_key),
             address,
             port,
+            ticket: None,
         }
     }
 
@@ -59,6 +62,7 @@ impl Node {
             keys: node.keys.clone(),
             address,
             port,
+            ticket: None,
         }
     }
 
@@ -72,7 +76,12 @@ impl Node {
             keys,
             address,
             port,
+            ticket: None,
         })
+    }
+
+    pub fn set_ticket(&mut self, ticket: &NodeTicket) {
+        self.ticket = Some(ticket.clone());
     }
 
     pub fn get_addr(&self) -> Result<SocketAddr, Box<dyn std::error::Error>> {

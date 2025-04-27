@@ -1,25 +1,30 @@
 use std::{collections::HashMap, sync::Arc};
 
+use rand::Rng;
 use tokio::sync::{Mutex, MutexGuard};
 use tonic::{Request, Response, Status};
 
 use crate::{
+    blockchain::DoubleHasher,
     kademlia::NodeId,
     network::grpc::proto::{
-        find_value_response::Resp, kademlia_service_server::KademliaService, FindNodeRequest,
-        FindNodeResponse, FindValueRequest, FindValueResponse, NodeInfo, PingRequest, PongResponse,
-        RepetedNode, StoreRequest, StoreResponse,
+        find_value_response::Resp, join_service_server::JoinService,
+        kademlia_service_server::KademliaService, ChallangeRequest, ChallangeResponse,
+        FindNodeRequest, FindNodeResponse, FindValueRequest, FindValueResponse, NodeInfo,
+        PingRequest, PongResponse, RepetedNode, StoreRequest, StoreResponse, SubmitRequest,
+        SubmitResponse,
     },
 };
 
 use super::{
-    dht::KademliaData,
+    data::{KademliaData, Ticket},
     event::{DHTEvent, DHTEventHandler},
     routing_table::RoutingTable,
+    ticket::NodeTicket,
     Node, KBUCKET_MAX,
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct GrpcNetwork {
     pub(crate) node: Node,
     pub(crate) routing_table: Arc<Mutex<RoutingTable>>,
@@ -60,6 +65,69 @@ impl GrpcNetwork {
 
         routing_table.insert_node(&incoming_node).await;
         Ok(routing_table)
+    }
+}
+
+#[tonic::async_trait]
+impl JoinService for GrpcNetwork {
+    async fn request_challange(
+        &self,
+        request: tonic::Request<ChallangeRequest>,
+    ) -> Result<tonic::Response<ChallangeResponse>, tonic::Status> {
+        let request = request.into_inner();
+
+        let pub_key = NodeId::try_from(request.pub_key)
+            .map_err(|e| tonic::Status::invalid_argument(format!("Invalid node ID: {}", e)))?;
+
+        let difficulty: u32 = 5;
+        let nonce: u32 = rand::rng().random();
+
+        let mut dht = self.get_distributed_table().await;
+        dht.insert(pub_key, Ticket::new(nonce, difficulty));
+
+        Ok(Response::new(ChallangeResponse {
+            challange: nonce,
+            difficulty,
+        }))
+    }
+
+    async fn submit_challange(
+        &self,
+        request: tonic::Request<SubmitRequest>,
+    ) -> Result<tonic::Response<SubmitResponse>, tonic::Status> {
+        let request = request.into_inner();
+
+        let pub_key = NodeId::try_from(request.pub_key)
+            .map_err(|e| tonic::Status::invalid_argument(format!("Invalid node ID: {}", e)))?;
+
+        let mut dht = self.get_distributed_table().await;
+        let Some(ticket) = dht.get(&pub_key) else {
+            return Err(tonic::Status::not_found("Ticket not found"));
+        };
+
+        let ticket = ticket
+            .as_any()
+            .downcast_ref::<Ticket>()
+            .ok_or_else(|| tonic::Status::internal("Failed to fetch the Ticket"))?;
+
+        let prof_of_work = NodeTicket::calculate_pow(
+            pub_key.0,
+            ticket.nonce,
+            request.nonce,
+            DoubleHasher::default(),
+        );
+
+        if !NodeTicket::validate_pow(&prof_of_work, ticket.difficulty) {
+            return Err(tonic::Status::unauthenticated("Prof of work invalid"));
+        }
+
+        if let None = dht.remove(&pub_key) {
+            return Err(tonic::Status::aborted("Failed to update tables"));
+        }
+
+        Ok(Response::new(SubmitResponse {
+            pubkey: pub_key.into(),
+        }))
     }
 }
 

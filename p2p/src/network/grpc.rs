@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use proto::{
+    join_service_client::JoinServiceClient, join_service_server::JoinServiceServer,
     kademlia_service_client::KademliaServiceClient, kademlia_service_server::KademliaServiceServer,
 };
 use thiserror::Error;
@@ -12,13 +13,14 @@ use tonic::{
 
 use crate::{
     kademlia::{
-        dht::KademliaData, event::DHTEventHandler, network::GrpcNetwork, NodeId, RoutingTable,
+        data::KademliaData, event::DHTEventHandler, network::GrpcNetwork, NodeId, RoutingTable,
     },
     Node,
 };
 
 pub mod proto {
     tonic::include_proto!("kademlia");
+    tonic::include_proto!("join");
 }
 
 #[derive(Debug, Error)]
@@ -47,11 +49,30 @@ impl GrpcNetwork {
         let node_addr = node.get_addr()?;
 
         Server::builder()
-            .add_service(KademliaServiceServer::new(grpc_kademlia))
+            .add_service(KademliaServiceServer::new(grpc_kademlia.clone()))
+            .add_service(JoinServiceServer::new(grpc_kademlia))
             .serve(node_addr)
             .await?;
 
         Ok(())
+    }
+
+    pub async fn handshake(target: Node) -> Result<JoinServiceClient<Channel>, NetWorkError> {
+        let Ok(target_addr) = target.get_addr() else {
+            return Err(NetWorkError::FailedToFetchIp);
+        };
+
+        let url = format!("http://{}:{}", target_addr.ip(), target_addr.port());
+
+        let channel = Channel::from_shared(url)
+            .map_err(|_| NetWorkError::FailToEstablishConnection)?
+            .connect()
+            .await
+            .map_err(|_| NetWorkError::FailToEstablishConnection)?;
+
+        let client = JoinServiceClient::new(channel);
+
+        Ok(client)
     }
 
     pub async fn connect_over(

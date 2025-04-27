@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package join;
+
+import "google/protobuf/empty.proto";
+
+service JoinService {
+  rpc RequestChallange (ChallangeRequest) returns (ChallangeResponse);
+  rpc SubmitChallange (SubmitRequest) returns (SubmitResponse);
+}
+
+message ChallangeRequest {
+  bytes pub_key = 1;
+}
+
+message ChallangeResponse {
+  uint32 challange = 1;
+  uint32 difficulty = 2;
+}
+
+message SubmitRequest {
+  bytes pub_key = 1;
+  bytes challenge = 2;
+  uint32 nonce = 3;
+}
+
+message SubmitResponse {
+  bytes pubkey = 1;
+}

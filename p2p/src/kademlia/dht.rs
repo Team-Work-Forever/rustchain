@@ -13,20 +13,9 @@ use crate::network::grpc::proto::{
 };
 
 use super::{
-    distance::NodeDistance, event::DHTEventHandler, network::GrpcNetwork,
-    routing_table::RoutingTable, Node, NodeId, KBUCKET_MAX,
+    data::KademliaData, distance::NodeDistance, event::DHTEventHandler, network::GrpcNetwork,
+    routing_table::RoutingTable, ticket::NodeTicket, Node, NodeId, KBUCKET_MAX,
 };
-
-#[typetag::serde]
-pub trait KademliaData: erased_serde::Serialize + Debug + Send + Sync + 'static {
-    fn clone_dyn(&self) -> Box<dyn KademliaData>;
-}
-
-impl Clone for Box<dyn KademliaData> {
-    fn clone(&self) -> Self {
-        self.clone_dyn()
-    }
-}
 
 #[derive(Debug, Error)]
 pub enum KademliaError {
@@ -69,7 +58,15 @@ impl DHTNode {
         Some(dth)
     }
 
-    pub async fn join_network(&self, bootstrap: Node) -> Option<()> {
+    pub async fn join_network(&mut self, bootstrap: Node) -> Option<()> {
+        let Some(ticket) = NodeTicket::request_challange(&self.core, &bootstrap).await else {
+            return None;
+        };
+
+        if let None = ticket.submit_challange(&mut self.core, &bootstrap).await {
+            return None;
+        };
+
         {
             let mut routing_table = self.get_routing_table().await;
             routing_table.insert_node(&bootstrap).await;
@@ -115,8 +112,7 @@ impl DHTNode {
     pub async fn ping(host: &Node, target: &Node) -> Result<(), KademliaError> {
         let mut client = GrpcNetwork::connect_over(host.clone(), target.clone())
             .await
-            .map_err(|e| {
-                println!("{}", e);
+            .map_err(|_| {
                 return KademliaError::PingFailedError;
             })?;
 

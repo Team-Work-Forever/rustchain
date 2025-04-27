@@ -5,7 +5,7 @@ use tokio::sync::Mutex;
 
 use crate::DHTNode;
 
-use super::{dht::KademliaData, Node, NodeId, RoutingTable};
+use super::{data::KademliaData, Node, NodeId, RoutingTable};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PersistDHTNode {

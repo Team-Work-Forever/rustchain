@@ -4,7 +4,7 @@ pub trait HashFunc: Clone {
     fn hash(&self, value: String) -> [u8; 32];
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct DoubleHasher;
 
 #[derive(Clone)]

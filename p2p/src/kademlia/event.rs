@@ -1,6 +1,6 @@
 use std::fmt::Debug;
 
-use super::dht::KademliaData;
+use super::data::KademliaData;
 
 #[derive(Debug)]
 pub enum DHTEvent {

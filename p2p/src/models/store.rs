@@ -35,7 +35,12 @@ impl NetworkNode {
                 .lock()
                 .map_err(|_| StoreNodeError::PersistError)?;
 
-            let dht = self.kademlia_net.into_persist().await;
+            let kademlia = self
+                .kademlia_net
+                .lock()
+                .map_err(|_| StoreNodeError::PersistError)?;
+
+            let dht = kademlia.into_persist().await;
 
             Ok(PersistNodeNetwork {
                 block_chain: block_chain.clone(),
