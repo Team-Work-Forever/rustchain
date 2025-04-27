@@ -12,13 +12,20 @@ use crate::{
     },
 };
 
-use super::{dht::KademliaData, routing_table::RoutingTable, Node, KBUCKET_MAX};
+use super::{
+    dht::KademliaData,
+    event::{DHTEvent, DHTEventHandler},
+    routing_table::RoutingTable,
+    Node, KBUCKET_MAX,
+};
 
 #[derive(Debug)]
 pub(crate) struct GrpcNetwork {
     pub(crate) node: Node,
     pub(crate) routing_table: Arc<Mutex<RoutingTable>>,
     pub(crate) distributed_hashing_table: Arc<Mutex<HashMap<NodeId, Box<dyn KademliaData>>>>,
+
+    pub(crate) event_handler: Arc<dyn DHTEventHandler>,
 }
 
 impl GrpcNetwork {
@@ -26,11 +33,13 @@ impl GrpcNetwork {
         node: Node,
         routing_table: Arc<Mutex<RoutingTable>>,
         distributed_hashing_table: Arc<Mutex<HashMap<NodeId, Box<dyn KademliaData>>>>,
+        event_handler: Arc<dyn DHTEventHandler>,
     ) -> Self {
         Self {
             node,
             routing_table,
             distributed_hashing_table,
+            event_handler,
         }
     }
 
@@ -79,13 +88,16 @@ impl KademliaService for GrpcNetwork {
             .map_err(|e| tonic::Status::invalid_argument(format!("Invalid node ID: {}", e)))?;
 
         let config = bincode::config::standard();
-        let Ok((decoded_value, _)) = bincode::serde::decode_from_slice(&request.value, config)
+        let Ok((decoded_value, _)) =
+            bincode::serde::decode_from_slice::<Box<dyn KademliaData>, _>(&request.value, config)
         else {
             return Err(tonic::Status::aborted("Failed to decode value"));
         };
 
         let mut dht = self.get_distributed_table().await;
-        dht.insert(key.clone(), decoded_value);
+
+        dht.insert(key.clone(), decoded_value.clone());
+        self.event_handler.on_event(DHTEvent::Store(decoded_value));
 
         Ok(Response::new(StoreResponse { key: key.into() }))
     }

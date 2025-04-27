@@ -13,12 +13,20 @@ use crate::network::grpc::proto::{
 };
 
 use super::{
-    distance::NodeDistance, network::GrpcNetwork, routing_table::RoutingTable, Node, NodeId,
-    KBUCKET_MAX,
+    distance::NodeDistance, event::DHTEventHandler, network::GrpcNetwork,
+    routing_table::RoutingTable, Node, NodeId, KBUCKET_MAX,
 };
 
 #[typetag::serde]
-pub trait KademliaData: erased_serde::Serialize + Debug + Send + Sync + 'static {}
+pub trait KademliaData: erased_serde::Serialize + Debug + Send + Sync + 'static {
+    fn clone_dyn(&self) -> Box<dyn KademliaData>;
+}
+
+impl Clone for Box<dyn KademliaData> {
+    fn clone(&self) -> Self {
+        self.clone_dyn()
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum KademliaError {
@@ -47,7 +55,7 @@ pub struct DHTNode {
 }
 
 impl DHTNode {
-    pub async fn bootstrap(address: String, port: usize) -> Option<Self> {
+    pub async fn new(address: String, port: usize) -> Option<Self> {
         let Some(node) = Node::new(address, port) else {
             return None;
         };
@@ -58,31 +66,42 @@ impl DHTNode {
             distributed_hash_tb: Arc::new(Mutex::new(HashMap::new())),
         };
 
-        dth.init();
-
         Some(dth)
     }
 
-    pub async fn new(bootstrap: Self, address: String, port: usize) -> Option<Self> {
-        let boot_node = Self::bootstrap(address, port).await?;
-
+    pub async fn join_network(&self, bootstrap: Node) -> Option<()> {
         {
-            let mut routing_table = boot_node.get_routing_table().await;
-            routing_table.insert_node(&bootstrap.core).await;
+            let mut routing_table = self.get_routing_table().await;
+            routing_table.insert_node(&bootstrap).await;
         }
 
-        let Ok(update_nodes) = boot_node.node_lookup(&boot_node.core.id).await else {
+        let Ok(update_nodes) = self.node_lookup(&self.core.id).await else {
             return None;
         };
 
         {
-            let mut routing_table = boot_node.get_routing_table().await;
+            let mut routing_table = self.get_routing_table().await;
             for node in update_nodes {
                 routing_table.insert_node(&node).await;
             }
         }
 
-        Some(boot_node)
+        Some(())
+    }
+
+    pub fn init_grpc_connection(&self, event_handler: Arc<dyn DHTEventHandler>) {
+        let core = self.core.clone();
+        let routing_table = self.routing_table.clone();
+        let distributed_hash_tb = self.distributed_hash_tb.clone();
+
+        tokio::spawn(async move {
+            if let Err(e) =
+                GrpcNetwork::start_network(core, routing_table, distributed_hash_tb, event_handler)
+                    .await
+            {
+                eprintln!("Network error: {}", e);
+            }
+        });
     }
 
     async fn get_routing_table(&self) -> MutexGuard<RoutingTable> {
@@ -91,23 +110,6 @@ impl DHTNode {
 
     async fn get_dth_table(&self) -> MutexGuard<HashMap<NodeId, Box<dyn KademliaData>>> {
         self.distributed_hash_tb.lock().await
-    }
-
-    fn init(&self) {
-        let core = self.core.clone();
-        let routing_table = self.routing_table.clone();
-        let distributed_hash_tb = self.distributed_hash_tb.clone();
-
-        // start the GRPC
-        tokio::spawn(async move {
-            if let Err(e) =
-                GrpcNetwork::start_network(core, routing_table, distributed_hash_tb).await
-            {
-                eprintln!("Network error: {}", e);
-            }
-        });
-
-        // start the block chain miner
     }
 
     pub async fn ping(host: &Node, target: &Node) -> Result<(), KademliaError> {

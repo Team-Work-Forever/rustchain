@@ -11,7 +11,9 @@ use tonic::{
 };
 
 use crate::{
-    kademlia::{dht::KademliaData, network::GrpcNetwork, NodeId, RoutingTable},
+    kademlia::{
+        dht::KademliaData, event::DHTEventHandler, network::GrpcNetwork, NodeId, RoutingTable,
+    },
     Node,
 };
 
@@ -33,9 +35,14 @@ impl GrpcNetwork {
         node: Node,
         routing_table: Arc<Mutex<RoutingTable>>,
         distributed_hash_table: Arc<Mutex<HashMap<NodeId, Box<dyn KademliaData>>>>,
+        event_bus: Arc<dyn DHTEventHandler>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let grpc_kademlia =
-            GrpcNetwork::new(node.clone(), routing_table.clone(), distributed_hash_table);
+        let grpc_kademlia = GrpcNetwork::new(
+            node.clone(),
+            routing_table.clone(),
+            distributed_hash_table,
+            event_bus,
+        );
 
         let node_addr = node.get_addr()?;
 

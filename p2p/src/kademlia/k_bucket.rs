@@ -37,10 +37,6 @@ impl KBucket {
         }
     }
 
-    pub fn get_first_node(&self) -> Option<Node> {
-        self.nodes.get(0).cloned()
-    }
-
     pub fn get_oldest_node(&self) -> Option<Node> {
         self.nodes.front().cloned()
     }

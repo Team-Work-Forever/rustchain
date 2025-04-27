@@ -6,9 +6,10 @@ use std::{
 };
 
 use bincode::config;
-use log::{error, info};
+use log::error;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tonic::async_trait;
 
 #[derive(Debug, Error)]
 pub enum StoreError {
@@ -25,7 +26,8 @@ pub enum StoreError {
     NotFound,
 }
 
-pub trait NetworkNodeStorage {
+#[async_trait]
+pub trait NetworkNodeStorage: Debug {
     fn load<TData>(&self) -> Result<TData, StoreError>
     where
         TData: Serialize + for<'de> Deserialize<'de>;
@@ -35,6 +37,7 @@ pub trait NetworkNodeStorage {
         TData: Serialize + for<'de> Deserialize<'de> + Debug;
 }
 
+#[derive(Debug, Clone)]
 pub struct InFileStorage<'a> {
     storage_location: &'a str,
 }
@@ -76,8 +79,6 @@ impl<'a> NetworkNodeStorage for InFileStorage<'a> {
         let config = config::standard();
         let bin_file_data = File::create(self.storage_location)?;
         let mut buff_writer = BufWriter::new(bin_file_data);
-
-        info!("{:#?}", data);
 
         let bin_data = bincode::serde::encode_to_vec(&data, config)?;
         buff_writer.write_all(&bin_data)?;

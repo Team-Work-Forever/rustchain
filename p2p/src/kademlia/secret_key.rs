@@ -1,9 +1,10 @@
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use rand::{rngs::OsRng, TryRngCore};
+use serde::{Deserialize, Serialize};
 
 use super::NODE_ID_LENGTH;
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SecretPair {
     pub public_key: [u8; NODE_ID_LENGTH],  // Verifing key
     pub private_key: [u8; NODE_ID_LENGTH], // Signing key

@@ -1,15 +1,20 @@
 use std::net::SocketAddr;
 
+use serde::{Deserialize, Serialize};
+
 use crate::network::grpc::proto::NodeInfo;
 
 use super::{secret_key::SecretPair, NodeId, NODE_ID_LENGTH};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct Node {
     pub id: NodeId,
     pub keys: SecretPair,
 
+    #[serde(skip)]
     address: String,
+
+    #[serde(skip)]
     port: usize,
 }
 
@@ -37,6 +42,24 @@ impl Node {
             address: node.addr,
             port: node.port as usize,
         })
+    }
+
+    pub fn from_pub_key(pub_key: &[u8; NODE_ID_LENGTH], address: String, port: usize) -> Self {
+        Self {
+            id: NodeId::new(pub_key),
+            keys: SecretPair::default(*pub_key),
+            address,
+            port,
+        }
+    }
+
+    pub fn from_node(address: String, port: usize, node: &Node) -> Self {
+        Self {
+            id: node.id.clone(),
+            keys: node.keys.clone(),
+            address,
+            port,
+        }
     }
 
     pub fn new(address: String, port: usize) -> Option<Self> {

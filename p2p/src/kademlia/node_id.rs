@@ -1,9 +1,10 @@
 use rand::{rngs::OsRng, TryRngCore};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{distance::Distance, NODE_ID_LENGTH};
 
-#[derive(Clone, Hash, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
 pub struct NodeId(pub [u8; NODE_ID_LENGTH]);
 
 impl NodeId {
