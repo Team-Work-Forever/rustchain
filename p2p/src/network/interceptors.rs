@@ -192,8 +192,6 @@ impl GrpcNetwork {
             ));
         }
 
-        println!("Pois: {}", hex::encode(calculate_pow));
-
         Ok(request)
     }
 }

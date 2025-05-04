@@ -165,7 +165,10 @@ impl KademliaService for GrpcNetwork {
         let mut dht = self.get_distributed_table().await;
 
         dht.insert(key.clone(), decoded_value.clone());
-        self.event_handler.on_event(DHTEvent::Store(decoded_value));
+
+        self.event_handler
+            .on_event(DHTEvent::Store(decoded_value))
+            .await;
 
         Ok(Response::new(StoreResponse { key: key.into() }))
     }
@@ -212,6 +215,7 @@ impl KademliaService for GrpcNetwork {
 
         if let Some(value) = dht.get(&key) {
             let config = bincode::config::standard();
+
             let Ok(encoded_data) = bincode::serde::encode_to_vec(&value, config) else {
                 return Err(Status::aborted("Failed to return value"));
             };

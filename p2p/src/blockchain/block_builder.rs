@@ -1,7 +1,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::{hash_func::HashFunc, Block, Transaction};
-use crate::merkle::MerkleTree;
+use crate::{kademlia::secret_key::SecretPair, merkle::MerkleTree};
 
 #[derive(Debug)]
 pub(crate) struct BlockBuilder {
@@ -9,6 +9,7 @@ pub(crate) struct BlockBuilder {
     difficulty: u32,
     prev_hash: [u8; 32],
     transactions: Vec<Transaction>,
+    pair: Option<SecretPair>,
 }
 
 impl BlockBuilder {
@@ -18,6 +19,7 @@ impl BlockBuilder {
             difficulty: dificult,
             prev_hash,
             transactions: vec![],
+            pair: None,
         }
     }
 
@@ -26,6 +28,11 @@ impl BlockBuilder {
         Iterator: IntoIterator<Item = Transaction>,
     {
         self.transactions.extend(transactions);
+        self
+    }
+
+    pub fn sign_with(&mut self, pair: SecretPair) -> &mut Self {
+        self.pair = Some(pair);
         self
     }
 
@@ -54,8 +61,9 @@ impl BlockBuilder {
             hash = hasher.hash(input);
 
             if self.validate_hash(&hash, self.difficulty) {
-                return Block::new(
+                let mut block = Block::new(
                     self.index,
+                    self.difficulty,
                     merkle_root,
                     self.prev_hash,
                     hash,
@@ -63,6 +71,13 @@ impl BlockBuilder {
                     nonce,
                     self.transactions.clone(),
                 );
+
+                let Some(pair) = self.pair.clone() else {
+                    continue;
+                };
+
+                block.header.sign(pair);
+                return block;
             }
 
             nonce = nonce.wrapping_add(1);

@@ -3,7 +3,7 @@
 logs/
 
 # block chain binary
-block_chain.bin
+*.bin
 
 # Ignore todo's
 todo.md

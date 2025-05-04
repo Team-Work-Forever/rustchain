@@ -1,11 +1,10 @@
-use std::{sync::Arc, thread, time};
+use std::{sync::Arc, time};
 
 use log::{error, info};
 use p2p::{
     blockchain::Transaction,
     logger,
     models::{
-        data::KData,
         network_node::{NetworkMode, NetworkNode},
         transactions::InitAuctionTransaction,
     },
@@ -15,40 +14,39 @@ use p2p::{
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     logger::init_logger("info", "logs", "ledger");
-    let storage = InFileStorage::new("start_wars.bin");
+    let storage = InFileStorage::new("star_wars.bin");
+    let std = InFileStorage::new("impire_strikes_back.bin");
 
     let Some(bootstrap) = NetworkNode::load_node(
         NetworkMode::Bootstrap {
             host: "127.0.0.1".into(),
             port: 3000,
         },
-        storage.clone(),
+        std.clone(),
     )
     .await
     else {
         panic!("Error creating bootstrap");
     };
 
-    let Ok(conn) = bootstrap.get_connection() else {
+    let Ok(conn) = bootstrap.get_connection().await else {
         panic!("Error fetching pub key");
     };
 
     let bootstrap_list = vec![conn];
 
-    let Some(node1) = NetworkNode::new(NetworkMode::Join {
-        bootstraps: bootstrap_list.clone(),
-        host: "127.0.0.1".into(),
-        port: 4000,
-    })
+    let Some(node1) = NetworkNode::load_node(
+        NetworkMode::Join {
+            bootstraps: bootstrap_list.clone(),
+            host: "127.0.0.1".into(),
+            port: 4000,
+        },
+        storage.clone(),
+    )
     .await
     else {
         panic!("Error creating node1");
     };
-
-    println!(
-        "Ticket: {:#?}",
-        node1.kademlia_net.lock().unwrap().core.ticket
-    );
 
     let Some(node2) = NetworkNode::new(NetworkMode::Join {
         bootstraps: bootstrap_list,
@@ -60,36 +58,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         panic!("Error creating node2");
     };
 
-    println!(
-        "Ticket: {:#?}",
-        node2.kademlia_net.lock().unwrap().core.ticket
-    );
+    // if let Err(_) = node2.sync().await {
+    //     panic!("Why");
+    // }
 
-    let Some(store_id) = p2p::kademlia::NodeId::random() else {
-        panic!("Ardeu!")
-    };
+    // return Ok(());
 
-    let _ = node1
-        .kademlia_net
-        .lock()
-        .unwrap()
-        .store(&store_id, Box::new(KData::new("Diogo Assunção".into())))
-        .await;
+    let node_tx = Arc::clone(&node1.block_chain);
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(time::Duration::from_secs(15)).await;
+            let node_tx = node_tx.lock().await;
 
-    let tx_chain = Arc::clone(&bootstrap.block_chain);
-    thread::spawn(move || loop {
-        thread::sleep(time::Duration::from_secs(15));
-        let tx_chain = tx_chain.lock().unwrap();
+            match node_tx.transaction_poll.add_transaction(Transaction::new(
+                "Diogo".to_string(),
+                "OnlyCavas".to_string(),
+                InitAuctionTransaction {
+                    auction_id: "cebolas".into(),
+                },
+            )) {
+                Ok(_) => info!("[💰] Added Transaction"),
+                Err(_) => error!("Error while submitting transaction"),
+            }
+        }
+    });
 
-        match tx_chain.transaction_poll.add_transaction(Transaction::new(
-            "Diogo".to_string(),
-            "OnlyCavas".to_string(),
-            InitAuctionTransaction {
-                auction_id: "cebolas".into(),
-            },
-        )) {
-            Ok(_) => info!("[💰] Added Transaction"),
-            Err(_) => error!("Error while submitting transaction"),
+    let node2_tx = Arc::clone(&node2.block_chain);
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(time::Duration::from_secs(20)).await;
+            let node2_tx = node2_tx.lock().await;
+
+            match node2_tx.transaction_poll.add_transaction(Transaction::new(
+                "Diogo".to_string(),
+                "OnlyCavas".to_string(),
+                InitAuctionTransaction {
+                    auction_id: "cebolas".into(),
+                },
+            )) {
+                Ok(_) => info!("[💰] Added Transaction"),
+                Err(_) => error!("Error while submitting transaction"),
+            }
         }
     });
 
@@ -99,7 +108,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .expect("Failed to listen for ctrl+c");
 
-    if let Err(_) = bootstrap.persist_node(storage).await {
+    if let Err(_) = node1.persist_node(storage).await {
+        panic!("Failed to persist node")
+    }
+
+    if let Err(_) = bootstrap.persist_node(std).await {
         panic!("Failed to persist node")
     }
 

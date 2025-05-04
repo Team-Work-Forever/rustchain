@@ -1,18 +1,31 @@
-use std::{
-    sync::{Arc, Mutex},
-    thread::{self, JoinHandle},
-    time,
-};
+use std::{sync::Arc, time};
 
 use log::{error, info};
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
+use tokio::sync::Mutex;
 
-use crate::blockchain::event::BlockChainEvent;
+use crate::{blockchain::event::BlockChainEvent, kademlia::secret_key::SecretPair};
 
 use super::{
     block_builder::BlockBuilder, event::BlockChainEventHandler, hash_func::DoubleHasher,
-    transaction_pool::TransactionPool, Block, HashFunc,
+    transaction_pool::TransactionPool, Block, HashFunc, Transaction,
 };
+
+#[derive(Debug, Error)]
+pub enum BlockChainError {
+    #[error("Block already appended")]
+    BlockAlreadyPersisted,
+
+    #[error("Block is invalid")]
+    InvalidBlock,
+
+    #[error("Failed to fetch block")]
+    BlockNotFound,
+
+    #[error("Chain is broken")]
+    ChainBroken,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BlockChain {
@@ -36,8 +49,18 @@ impl BlockChain {
     where
         THasher: HashFunc,
     {
-        for block in self.blocks.iter() {
-            if !block.validate(hasher.clone(), block.merkle_root) {
+        for (current, next) in self.blocks.iter().zip(self.blocks.iter().skip(1)) {
+            if !current.validate(hasher.clone(), current.header.merkle_root) {
+                return false;
+            }
+
+            if next.header.prev_hash != current.header.hash {
+                return false;
+            }
+        }
+
+        if let Some(last) = self.blocks.last() {
+            if !last.validate(hasher.clone(), last.header.merkle_root) {
                 return false;
             }
         }
@@ -46,34 +69,116 @@ impl BlockChain {
     }
 
     pub fn start_miner(
+        pair: SecretPair,
         block_chain: Arc<Mutex<Self>>,
         event_handler: Arc<dyn BlockChainEventHandler>,
         batch_size: usize,
         batch_pulling: time::Duration,
-    ) -> JoinHandle<()> {
+    ) {
         let block_chain = Arc::clone(&block_chain);
-        info!("[⛏️] Miner thread started!");
+        let event_handler = Arc::clone(&event_handler);
 
-        thread::spawn(move || loop {
-            thread::sleep(batch_pulling);
-            let mut block_chain = block_chain.lock().expect("Error locking block chain");
+        info!("[⛏️] Miner async task started!");
 
-            match block_chain
-                .transaction_poll
-                .fetch_batch_transactions(batch_size)
-            {
-                Ok(transactions) if !transactions.is_empty() => {
-                    let block = block_chain.add_block(|mut builder| {
-                        builder.add_transactions(transactions);
-                        builder
-                    });
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(batch_pulling).await;
 
-                    event_handler.on_event(BlockChainEvent::AddBlock(block));
-                }
-                Ok(_) => info!("No transactions to be added"),
-                Err(e) => error!("Failed to fetch transactions: {:?}", e),
+                let block = {
+                    let mut block_chain = block_chain.lock().await;
+
+                    match block_chain
+                        .transaction_poll
+                        .fetch_batch_transactions(batch_size)
+                    {
+                        Ok(transactions) if !transactions.is_empty() => {
+                            let block = block_chain.add_block(|mut builder| {
+                                builder
+                                    .add_transactions(transactions)
+                                    .sign_with(pair.clone());
+
+                                builder
+                            });
+
+                            Some(block)
+                        }
+                        Ok(_) => {
+                            info!("No transactions to be added");
+                            None
+                        }
+                        Err(e) => {
+                            error!("Failed to fetch transactions: {:?}", e);
+                            None
+                        }
+                    }
+                };
+
+                let Some(block) = block else {
+                    return;
+                };
+
+                let event_handler = Arc::clone(&event_handler);
+                event_handler
+                    .on_event(BlockChainEvent::AddBlock(block))
+                    .await;
             }
-        })
+        });
+    }
+
+    pub fn search_blocks_on<PerdicateFn>(
+        &self,
+        perdicate: PerdicateFn,
+    ) -> impl Iterator<Item = &Block>
+    where
+        PerdicateFn: Fn(&Block) -> bool,
+    {
+        self.blocks.iter().filter(move |block| perdicate(*block))
+    }
+
+    pub fn search_transactions_on<PerdicateFn>(
+        &self,
+        perdicate: PerdicateFn,
+    ) -> impl Iterator<Item = &Transaction>
+    where
+        PerdicateFn: Fn(&Transaction) -> bool,
+    {
+        self.blocks
+            .iter()
+            .flat_map(|block| block.transactions.iter())
+            .filter(move |transaction| perdicate(*transaction))
+    }
+
+    pub fn remove_last(&mut self) -> Option<Block> {
+        self.blocks.pop()
+    }
+
+    pub fn append_block(&mut self, block: &Block) -> Result<(), BlockChainError> {
+        // verify the signature of the block
+
+        if self
+            .search_blocks_on(|b| b.header.hash == block.header.hash)
+            .next()
+            .is_some()
+        {
+            return Err(BlockChainError::BlockAlreadyPersisted);
+        }
+
+        let Some(prev_block) = self.get_last_block() else {
+            return Err(BlockChainError::BlockNotFound);
+        };
+
+        if !block.validate(DoubleHasher::default(), block.header.merkle_root) {
+            // if isn't valid then do something to announce that this is a maliciuse fucker
+            return Err(BlockChainError::InvalidBlock);
+        }
+
+        if prev_block.header.hash != block.header.prev_hash {
+            // it means it must perform a look_up to fetch the prev block until it finds the correct one, althoguh with a KMAX limit
+            return Err(BlockChainError::ChainBroken);
+        }
+
+        self.blocks.push(block.clone());
+        Ok(())
     }
 
     pub(crate) fn add_block<F>(&mut self, block_builder_fn: F) -> Block
@@ -88,12 +193,12 @@ impl BlockChain {
         let block_builder = block_builder_fn(BlockBuilder::new(
             self.next_index(),
             self.dificulty,
-            prev_block.hash,
+            prev_block.header.hash,
         ));
 
         info!("[⛏️] Mining block!");
         let block = block_builder.mine(DoubleHasher {});
-        info!("[⛏️] Finish block!: {}", hex::encode(block.hash));
+        info!("[⛏️] Finish block!: {}", hex::encode(block.header.hash));
 
         self.blocks.push(block.clone());
 
@@ -105,5 +210,9 @@ impl BlockChain {
             .len()
             .try_into()
             .expect("Block count exceeds u64::MAX")
+    }
+
+    pub fn get_last_block(&self) -> Option<&Block> {
+        self.blocks.last()
     }
 }

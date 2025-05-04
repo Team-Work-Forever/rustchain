@@ -1,4 +1,6 @@
-use ed25519_dalek::{SigningKey, VerifyingKey};
+use ed25519_dalek::{
+    ed25519::signature::SignerMut, Signature, SigningKey, VerifyingKey, SIGNATURE_LENGTH,
+};
 use rand::{rngs::OsRng, TryRngCore};
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +17,25 @@ impl SecretPair {
         Self {
             public_key,
             private_key: [0u8; NODE_ID_LENGTH],
+        }
+    }
+
+    pub fn sign(&self, value: [u8; NODE_ID_LENGTH]) -> [u8; SIGNATURE_LENGTH] {
+        let mut private_key = SigningKey::from_bytes(&self.private_key);
+        let signature = private_key.sign(&value);
+
+        signature.to_bytes()
+    }
+
+    pub fn verify(&self, value: [u8; NODE_ID_LENGTH], signature: [u8; SIGNATURE_LENGTH]) -> bool {
+        let public_key = match VerifyingKey::from_bytes(&self.public_key) {
+            Ok(pub_key) => pub_key,
+            _ => return false,
+        };
+
+        match public_key.verify_strict(&value, &Signature::from_bytes(&signature)) {
+            Ok(_) => true,
+            _ => false,
         }
     }
 

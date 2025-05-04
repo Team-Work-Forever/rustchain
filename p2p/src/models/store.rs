@@ -30,15 +30,9 @@ impl NetworkNode {
         storage: impl NetworkNodeStorage,
     ) -> Result<(), StoreNodeError> {
         let persist = {
-            let block_chain = self
-                .block_chain
-                .lock()
-                .map_err(|_| StoreNodeError::PersistError)?;
+            let block_chain = self.block_chain.lock().await;
 
-            let kademlia = self
-                .kademlia_net
-                .lock()
-                .map_err(|_| StoreNodeError::PersistError)?;
+            let kademlia = self.kademlia_net.lock().await;
 
             let dht = kademlia.into_persist().await;
 

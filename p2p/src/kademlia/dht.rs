@@ -4,7 +4,6 @@ use std::{
     sync::Arc,
 };
 
-use serde::Deserialize;
 use thiserror::Error;
 use tokio::sync::{Mutex, MutexGuard};
 
@@ -92,11 +91,11 @@ impl DHTNode {
         let distributed_hash_tb = self.distributed_hash_tb.clone();
 
         tokio::spawn(async move {
-            if let Err(e) =
+            if let Err(_) =
                 GrpcNetwork::start_network(core, routing_table, distributed_hash_tb, event_handler)
                     .await
             {
-                eprintln!("Network error: {}", e);
+                panic!("failed to spawn a grpc connection");
             }
         });
     }
@@ -203,11 +202,13 @@ impl DHTNode {
                 continue;
             }
 
-            let Ok(target_closest_nodes) =
-                DHTNode::find_node(&self.core, &current_node, target_id).await
-            else {
-                continue;
-            };
+            let target_closest_nodes =
+                match DHTNode::find_node(&self.core, &current_node, target_id).await {
+                    Ok(result) => result,
+                    Err(_) => {
+                        continue;
+                    }
+                };
 
             closest_nodes.push(current_node);
 
@@ -254,10 +255,10 @@ impl DHTNode {
         Ok(nodes)
     }
 
-    pub async fn find_value<TData>(&self, key: &NodeId) -> Result<Option<TData>, KademliaError>
-    where
-        TData: KademliaData + for<'de> Deserialize<'de>,
-    {
+    pub async fn find_value(
+        &self,
+        key: &NodeId,
+    ) -> Result<Option<Box<dyn KademliaData>>, KademliaError> {
         let routing_table = self.get_routing_table().await;
 
         // self, search for the value first!
@@ -304,10 +305,15 @@ impl DHTNode {
                 Some(Resp::Value(value)) => {
                     let config = bincode::config::standard();
 
-                    let Ok((decoded_value, _)) = bincode::serde::decode_from_slice(&value, config)
-                    else {
-                        return Err(KademliaError::FindValueFailedError);
-                    };
+                    let decoded_value =
+                        match bincode::serde::decode_from_slice::<Box<dyn KademliaData>, _>(
+                            &value, config,
+                        ) {
+                            Ok(result) => result.0,
+                            Err(_) => {
+                                return Err(KademliaError::FindValueFailedError);
+                            }
+                        };
 
                     return Ok(Some(decoded_value));
                 }

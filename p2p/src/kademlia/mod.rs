@@ -8,6 +8,7 @@ pub mod node;
 pub mod node_id;
 pub mod routing_table;
 pub mod secret_key;
+pub mod signature;
 pub mod store;
 pub mod ticket;
 
