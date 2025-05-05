@@ -26,4 +26,5 @@ message SubmitRequest {
 
 message SubmitResponse {
   bytes pubkey = 1;
+  bytes signature = 2;
 }

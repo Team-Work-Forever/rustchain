@@ -9,3 +9,4 @@ pub mod network;
 pub use kademlia::{dht::DHTNode, Node};
 
 pub mod models;
+pub mod utils;

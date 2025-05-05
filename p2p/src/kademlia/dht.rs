@@ -58,7 +58,7 @@ impl DHTNode {
     }
 
     pub async fn join_network(&mut self, bootstrap: Node) -> Option<()> {
-        let Some(ticket) = NodeTicket::request_challange(&self.core, &bootstrap).await else {
+        let Some(mut ticket) = NodeTicket::request_challange(&self.core, &bootstrap).await else {
             return None;
         };
 
@@ -120,7 +120,10 @@ impl DHTNode {
                 node_id: host.clone().id.into(),
             })
             .await
-            .map_err(|_| KademliaError::PingFailedError)?
+            .map_err(|e| {
+                panic!("error: {}", e);
+                return KademliaError::PingFailedError;
+            })?
             .into_inner();
 
         let target_id =

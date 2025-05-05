@@ -9,6 +9,7 @@ use p2p::{
         transactions::InitAuctionTransaction,
     },
     store::InFileStorage,
+    DHTNode,
 };
 
 #[tokio::main]
@@ -49,7 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         panic!("Error creating node1");
     };
 
-    let Some(_node2) = NetworkNode::new(NetworkMode::Join {
+    let Some(node2) = NetworkNode::new(NetworkMode::Join {
         bootstraps: bootstrap_list,
         host: "127.0.0.1".into(),
         port: 4001,
@@ -58,6 +59,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     else {
         panic!("Error creating node2");
     };
+
+    {
+        match DHTNode::ping(
+            &node1.kademlia_net.lock().await.core,
+            &node2.kademlia_net.lock().await.core,
+        )
+        .await
+        {
+            Ok(_) => println!("Yeah"),
+            Err(e) => panic!("Fuck: {}", e),
+        }
+    }
 
     let node_tx = Arc::clone(&node1.block_chain);
     tokio::spawn(async move {

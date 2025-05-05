@@ -2,14 +2,54 @@ use serde::{Deserialize, Serialize};
 
 use crate::kademlia::NODE_ID_LENGTH;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+use super::secret_key::SecretPair;
+
+pub trait HandleSignature {
+    fn sign(pair: SecretPair, value: [u8; NODE_ID_LENGTH]) -> Signature;
+    fn validate_signature(
+        &self,
+        pub_key: [u8; NODE_ID_LENGTH],
+        value: [u8; NODE_ID_LENGTH],
+    ) -> bool;
+}
+
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Signature {
     pub signature: Vec<u8>,
     pub pub_key: [u8; NODE_ID_LENGTH],
 }
 
+impl std::fmt::Debug for Signature {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Signature")
+            .field("signature", &hex::encode(&self.signature))
+            .field("pub_key", &hex::encode(&self.pub_key))
+            .finish()
+    }
+}
+
+impl HandleSignature for Signature {
+    fn sign(pair: SecretPair, value: [u8; NODE_ID_LENGTH]) -> Signature {
+        let signature = pair.sign(value);
+        Signature::from(pair.public_key, signature)
+    }
+
+    fn validate_signature(
+        &self,
+        pub_key: [u8; NODE_ID_LENGTH],
+        value: [u8; NODE_ID_LENGTH],
+    ) -> bool {
+        if pub_key != self.pub_key {
+            return false;
+        }
+
+        let pair = SecretPair::default(pub_key);
+        pair.verify(value, self.get_signature())
+    }
+}
+
 impl Signature {
-    pub fn new(pub_key: [u8; NODE_ID_LENGTH], signature: [u8; 64]) -> Self {
+    pub fn from(pub_key: [u8; NODE_ID_LENGTH], signature: [u8; 64]) -> Self {
         Self {
             pub_key,
             signature: signature.into(),

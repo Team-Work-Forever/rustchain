@@ -1,18 +1,25 @@
+use ed25519_dalek::SIGNATURE_LENGTH;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     blockchain::{DoubleHasher, HashFunc},
     kademlia::dht::KademliaError,
     network::grpc::proto::{ChallangeRequest, SubmitRequest},
+    utils,
 };
 
-use super::{network::GrpcNetwork, Node};
+use super::{
+    network::GrpcNetwork,
+    signature::{HandleSignature, Signature},
+    Node, NODE_ID_LENGTH,
+};
 
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NodeTicket {
     pub pow: [u8; 32],
     pub challange: u32,
     pub nonce: u32,
+    pub signature: Option<Signature>,
 }
 
 impl std::fmt::Debug for NodeTicket {
@@ -21,6 +28,7 @@ impl std::fmt::Debug for NodeTicket {
             .field("pow", &hex::encode(&self.pow))
             .field("challange", &self.challange)
             .field("nonce", &self.nonce)
+            .field("signature", &self.signature)
             .finish()
     }
 }
@@ -31,7 +39,28 @@ impl NodeTicket {
             pow,
             challange,
             nonce,
+            signature: None,
         }
+    }
+
+    pub fn set_signature(
+        &mut self,
+        pub_key: [u8; NODE_ID_LENGTH],
+        signature: [u8; SIGNATURE_LENGTH],
+    ) {
+        self.signature = Some(Signature::from(pub_key, signature))
+    }
+
+    pub fn validate_signature(&self, pub_key: Option<[u8; 32]>) -> bool {
+        let Some(signature) = self.signature.as_ref() else {
+            return false;
+        };
+
+        if let Some(pub_key) = pub_key {
+            return signature.validate_signature(pub_key, self.pow);
+        }
+
+        signature.validate_signature(signature.pub_key, self.pow)
     }
 
     pub fn calculate_pow(
@@ -114,7 +143,7 @@ impl NodeTicket {
         Some(NodeTicket::new(pow, response.challange, nonce))
     }
 
-    pub async fn submit_challange(&self, host: &mut Node, bootstrap: &Node) -> Option<()> {
+    pub async fn submit_challange(&mut self, host: &mut Node, bootstrap: &Node) -> Option<()> {
         let Ok(mut client) = GrpcNetwork::handshake(bootstrap.clone())
             .await
             .map_err(|_| {
@@ -124,7 +153,7 @@ impl NodeTicket {
             return None;
         };
 
-        let Ok(_) = client
+        let Ok(response) = client
             .submit_challange(SubmitRequest {
                 pub_key: host.keys.public_key.into(),
                 challenge: self.pow.into(),
@@ -134,6 +163,17 @@ impl NodeTicket {
         else {
             return None;
         };
+
+        let response = response.into_inner();
+
+        self.set_signature(
+            utils::to_32bytes(response.pubkey)?,
+            utils::to_64bytes(response.signature)?,
+        );
+
+        if !self.validate_signature(Some(bootstrap.keys.public_key)) {
+            return None;
+        }
 
         host.set_ticket(self);
         Some(())

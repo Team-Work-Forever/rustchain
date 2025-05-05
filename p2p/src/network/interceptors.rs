@@ -1,10 +1,12 @@
 use std::net::SocketAddr;
 
-use tonic::{metadata::MetadataValue, Code, Request, Status};
+use bincode::config;
+use serde::{Deserialize, Serialize};
+use tonic::{metadata::MetadataValue, Request, Status};
 
 use crate::{
     blockchain::DoubleHasher,
-    kademlia::{network::GrpcNetwork, ticket::NodeTicket, NodeId},
+    kademlia::{network::GrpcNetwork, ticket::NodeTicket, NodeId, NODE_ID_LENGTH},
     Node,
 };
 
@@ -12,18 +14,19 @@ use super::grpc::proto::NodeInfo;
 
 pub(crate) const PUB_KEY_METADATA: &str = "x-pubkey";
 pub(crate) const ADDR_KEY_METADATA: &str = "x-addr";
-
-pub(crate) const TICKET_POW_METADATA: &str = "x-pow";
-pub(crate) const TICKET_NONCE_METADATA: &str = "x-nonce";
-pub(crate) const TICKET_CHALLANGE_METADATA: &str = "x-challange";
+pub(crate) const TICKET_KEY_METADATA: &str = "x-auth-ticket";
 
 impl GrpcNetwork {
     pub(crate) fn get_peer<TRequest>(
         &self,
         request: &tonic::Request<TRequest>,
     ) -> Result<Node, Status> {
-        let pub_key = Self::get_public_key(&request)
-            .map_err(|_| Status::aborted("Failed to get public key"))?;
+        let pub_key = Self::get_from_metada::<[u8; NODE_ID_LENGTH], _>(
+            &request,
+            PUB_KEY_METADATA,
+            "cannot parse public key".into(),
+        )
+        .map_err(|_| Status::aborted("cannot parse public key"))?;
 
         let peer_addr = Self::get_addr(&request)?;
 
@@ -38,97 +41,68 @@ impl GrpcNetwork {
         Ok(node)
     }
 
-    pub(crate) fn get_number<TRequest>(
-        request: &tonic::Request<TRequest>,
-        key: &str,
-    ) -> Result<u32, Status> {
-        let metadata = request.metadata();
-
-        let number_val = metadata
-            .get(key)
-            .ok_or(Status::unauthenticated("Missing metadata key"))?;
-
-        let number_str = number_val
-            .to_str()
-            .map_err(|_| Status::invalid_argument("Metadata value is not a valid UTF-8 string"))?;
-
-        let number = number_str
-            .parse::<u32>()
-            .map_err(|_| Status::invalid_argument("Failed to parse metadata value as u32"))?;
-
-        Ok(number)
-    }
-
     pub(crate) fn get_addr<TRequest>(
         request: &tonic::Request<TRequest>,
     ) -> Result<SocketAddr, Status> {
-        let metadata = request.metadata();
+        let address = Self::get_from_metada::<String, _>(
+            &request,
+            ADDR_KEY_METADATA,
+            "cannot parse address".into(),
+        )
+        .map_err(|_| Status::aborted("cannot parse address"))?;
 
-        let addr_val = metadata
-            .get(ADDR_KEY_METADATA)
-            .ok_or(Status::unauthenticated("Missing node address"))?;
-
-        let addr_str = addr_val
-            .to_str()
-            .map_err(|_| Status::unauthenticated("Invalid addr metadata"))?;
-
-        let socket_addr = addr_str
+        let socket_addr = address
             .parse::<SocketAddr>()
             .map_err(|_| Status::unauthenticated("Invalid address format"))?;
 
         Ok(socket_addr)
     }
 
-    pub(crate) fn get_public_key<TRequest>(
+    fn get_from_metada<TData, TRequest>(
         request: &tonic::Request<TRequest>,
-    ) -> Result<[u8; 32], Status> {
+        key: &'static str,
+        error_msg: String,
+    ) -> Result<TData, Status>
+    where
+        TData: Serialize + for<'de> Deserialize<'de>,
+    {
         let metadata = request.metadata();
 
-        let pubkey_val = metadata
-            .get(PUB_KEY_METADATA)
+        let config = config::standard();
+        let hex_value = metadata
+            .get(key)
             .ok_or(Status::unauthenticated("Missing client pubkey"))?;
 
-        let pubkey_str = pubkey_val
-            .to_str()
-            .map_err(|_| Status::unauthenticated("Invalid metadata format"))?;
+        let encoded_value =
+            hex::decode(hex_value).map_err(|_| Status::aborted("Failed to decoded from hex"))?;
 
-        let decoded =
-            hex::decode(pubkey_str).map_err(|_| Status::unauthenticated("Hex decode failed"))?;
-
-        if decoded.len() != 32 {
-            return Err(Status::unauthenticated("Bad pubkey length"));
+        match bincode::serde::decode_from_slice::<TData, _>(&encoded_value, config) {
+            Ok((block_chain, _)) => Ok(block_chain),
+            Err(_) => Err(Status::aborted(error_msg)),
         }
-
-        let mut pubkey = [0u8; 32];
-        pubkey.copy_from_slice(&decoded);
-
-        Ok(pubkey)
     }
 
-    pub(crate) fn get_pow<TRequest>(
-        request: &tonic::Request<TRequest>,
-    ) -> Result<[u8; 32], Status> {
-        let metadata = request.metadata();
+    fn add_to_metadata<TData>(
+        request: &mut Request<()>,
+        key: &'static str,
+        value: TData,
+        error_msg: String,
+    ) -> Result<(), Status>
+    where
+        TData: Serialize + for<'de> Deserialize<'de>,
+    {
+        let config = config::standard();
+        let encoded_value = match bincode::serde::encode_to_vec(&value, config) {
+            Ok(e) => e,
+            Err(_) => panic!("Failed to append data to metadata"),
+        };
 
-        let pubkey_val = metadata
-            .get(TICKET_POW_METADATA)
-            .ok_or(Status::unauthenticated("Missing client pubkey"))?;
+        let meta_value = MetadataValue::try_from(hex::encode(encoded_value))
+            .map_err(|_| Status::internal(error_msg))?;
 
-        let pubkey_str = pubkey_val
-            .to_str()
-            .map_err(|_| Status::unauthenticated("Invalid metadata format"))?;
+        request.metadata_mut().insert(key, meta_value);
 
-        let decoded =
-            hex::decode(pubkey_str).map_err(|_| Status::unauthenticated("Hex decode failed"))?;
-
-        if decoded.len() != 32 {
-            return Err(Status::unauthenticated("Bad pubkey length"));
-        }
-
-        let mut pubkey = [0u8; 32];
-        pubkey.copy_from_slice(&decoded);
-
-        Ok(pubkey)
+        Ok(())
     }
 
     pub(crate) fn add_pubkey_interceptor(
@@ -136,60 +110,60 @@ impl GrpcNetwork {
         ticket: NodeTicket,
         addr: SocketAddr,
     ) -> impl FnMut(Request<()>) -> Result<Request<()>, Status> {
-        let encoded_pubkey = hex::encode(public_key);
-        let encoded_addr = addr.to_string();
-        let encoded_pow = hex::encode(ticket.pow);
-        let encoded_nonce = ticket.nonce;
-        let encoded_challange = ticket.challange;
-
         move |mut req: Request<()>| {
-            let pub_meta_value = MetadataValue::try_from(encoded_pubkey.clone())
-                .map_err(|_| Status::internal("Invalid public key"))?;
+            GrpcNetwork::add_to_metadata(
+                &mut req,
+                PUB_KEY_METADATA,
+                public_key,
+                "Invalid public key".into(),
+            )?;
 
-            req.metadata_mut().insert(PUB_KEY_METADATA, pub_meta_value);
+            GrpcNetwork::add_to_metadata(
+                &mut req,
+                ADDR_KEY_METADATA,
+                addr.to_string(),
+                "Invalid address key".into(),
+            )?;
 
-            let addr_meta_value = MetadataValue::try_from(encoded_addr.clone())
-                .map_err(|_| Status::internal("Invalid address key"))?;
-
-            req.metadata_mut()
-                .insert(ADDR_KEY_METADATA, addr_meta_value);
-
-            let pow_value = MetadataValue::try_from(encoded_pow.clone())
-                .map_err(|_| Status::internal("Invalid pow key"))?;
-
-            req.metadata_mut().insert(TICKET_POW_METADATA, pow_value);
-
-            let nonce_value = MetadataValue::try_from(encoded_nonce.clone())
-                .map_err(|_| Status::internal("Invalid nonce key"))?;
-
-            req.metadata_mut()
-                .insert(TICKET_NONCE_METADATA, nonce_value);
-
-            let nonce_value = MetadataValue::try_from(encoded_challange.clone())
-                .map_err(|_| Status::internal("Invalid challange key"))?;
-
-            req.metadata_mut()
-                .insert(TICKET_CHALLANGE_METADATA, nonce_value);
+            GrpcNetwork::add_to_metadata(
+                &mut req,
+                TICKET_KEY_METADATA,
+                ticket.clone(),
+                "Invalid ticket".into(),
+            )?;
 
             Ok(req)
         }
     }
 
     pub fn verify_sybil_attack(request: Request<()>) -> Result<Request<()>, Status> {
-        let pub_key = Self::get_public_key(&request)?;
-        let challange = Self::get_number(&request, TICKET_CHALLANGE_METADATA)?;
-        let nonce = Self::get_number(&request, TICKET_NONCE_METADATA)?;
+        let pub_key = Self::get_from_metada::<[u8; NODE_ID_LENGTH], _>(
+            &request,
+            PUB_KEY_METADATA,
+            "cannot parse public key".into(),
+        )
+        .map_err(|_| Status::aborted("cannot parse public key"))?;
 
-        let prof_of_work = Self::get_pow(&request)?;
+        let ticket = Self::get_from_metada::<NodeTicket, _>(
+            &request,
+            TICKET_KEY_METADATA,
+            "cannot parse ticket".into(),
+        )
+        .map_err(|_| Status::aborted("cannot parse ticket"))?;
 
-        let calculate_pow =
-            NodeTicket::calculate_pow(pub_key, challange, nonce, DoubleHasher::default());
+        if !ticket.validate_signature(None) {
+            return Err(Status::aborted("ticket not valid!"));
+        }
 
-        if calculate_pow != prof_of_work {
-            return Err(Status::new(
-                Code::Unauthenticated,
-                "Failed the Prof of Work",
-            ));
+        let calculate_pow = NodeTicket::calculate_pow(
+            pub_key,
+            ticket.challange,
+            ticket.nonce,
+            DoubleHasher::default(),
+        );
+
+        if calculate_pow != ticket.pow {
+            return Err(Status::unauthenticated("Failed the Prof of Work"));
         }
 
         Ok(request)

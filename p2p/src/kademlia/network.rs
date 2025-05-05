@@ -20,6 +20,7 @@ use super::{
     data::{KademliaData, Ticket},
     event::{DHTEvent, DHTEventHandler},
     routing_table::RoutingTable,
+    signature::{HandleSignature, Signature},
     ticket::NodeTicket,
     Node, KBUCKET_MAX,
 };
@@ -125,8 +126,11 @@ impl JoinService for GrpcNetwork {
             return Err(tonic::Status::aborted("Failed to update tables"));
         }
 
+        let signature = Signature::sign(self.node.keys.clone(), prof_of_work);
+
         Ok(Response::new(SubmitResponse {
-            pubkey: pub_key.into(),
+            pubkey: signature.pub_key.into(),
+            signature: signature.get_signature().into(),
         }))
     }
 }

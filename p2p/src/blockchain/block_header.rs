@@ -2,7 +2,11 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::kademlia::{secret_key::SecretPair, signature::Signature};
+use crate::kademlia::{
+    secret_key::SecretPair,
+    signature::{HandleSignature, Signature},
+    NODE_ID_LENGTH,
+};
 
 type MerkleRoot = [u8; 32];
 type Hash = [u8; 32];
@@ -21,21 +25,15 @@ pub struct BlockHeader {
 
 impl BlockHeader {
     pub fn sign(&mut self, pair: SecretPair) {
-        let signature = pair.sign(self.hash);
-        self.signature = Some(Signature::new(pair.public_key, signature));
+        self.signature = Some(Signature::sign(pair, self.hash))
     }
 
-    pub fn validate_signature(&self, pub_key: [u8; 32]) -> bool {
+    pub fn validate_signature(&self, pub_key: [u8; NODE_ID_LENGTH]) -> bool {
         let Some(signature) = self.signature.clone() else {
             return false;
         };
 
-        if pub_key != signature.pub_key {
-            return false;
-        }
-
-        let pair = SecretPair::default(pub_key);
-        pair.verify(self.hash, signature.get_signature())
+        signature.validate_signature(pub_key, self.hash)
     }
 }
 
@@ -53,7 +51,7 @@ impl fmt::Debug for BlockHeader {
             .field("hash", &hex::encode(self.hash));
 
         if let Some(signature) = &self.signature {
-            debug.field("signature", &hex::encode(&signature.get_signature()));
+            debug.field("signature", &signature);
         }
 
         debug.finish()
