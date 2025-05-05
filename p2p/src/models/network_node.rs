@@ -5,7 +5,10 @@ use std::{
     time::{self, Duration},
 };
 
-use rand::{rng, seq::IndexedRandom};
+use rand::{
+    rng,
+    seq::{IndexedRandom, SliceRandom},
+};
 use tokio::sync::Mutex;
 
 use crate::{
@@ -25,6 +28,7 @@ pub enum NetworkMode {
     Bootstrap {
         host: String,
         port: usize,
+        bootstraps: Vec<Node>,
     },
     Join {
         bootstraps: Vec<Node>,
@@ -62,9 +66,11 @@ impl NetworkNode {
         NetworkNode::connect(Arc::clone(&network_node)).await;
 
         match mode {
-            NetworkMode::Join { bootstraps, .. } | NetworkMode::Client { bootstraps, .. } => {
+            NetworkMode::Join { bootstraps, .. }
+            | NetworkMode::Client { bootstraps, .. }
+            | NetworkMode::Bootstrap { bootstraps, .. } => {
                 let Some(bootstrap) = bootstraps.choose(&mut rng()).cloned() else {
-                    return None;
+                    return Some(network_node);
                 };
 
                 println!("Connecting with peers...");
@@ -78,7 +84,6 @@ impl NetworkNode {
                 }
                 println!("Syncing process completed!");
             }
-            _ => {}
         };
 
         Some(network_node)
@@ -86,7 +91,7 @@ impl NetworkNode {
 
     pub async fn new(mode: NetworkMode) -> Option<Arc<Self>> {
         let (host, port) = match &mode {
-            NetworkMode::Bootstrap { host, port }
+            NetworkMode::Bootstrap { host, port, .. }
             | NetworkMode::Join { host, port, .. }
             | NetworkMode::Client { host, port, .. } => (host.clone(), *port),
         };
@@ -100,20 +105,58 @@ impl NetworkNode {
 
     pub(crate) async fn connect(self: Arc<Self>) {
         let handler: Arc<dyn DHTEventHandler> = Arc::clone(&self) as Arc<dyn DHTEventHandler>;
-        let kademlia = self.kademlia_net.lock().await;
 
-        kademlia.init_grpc_connection(Arc::clone(&handler));
+        let node_key_pair = {
+            let kademlia = self.kademlia_net.lock().await;
+            kademlia.init_grpc_connection(Arc::clone(&handler));
+
+            kademlia.core.keys.clone()
+        };
 
         let handler: Arc<dyn BlockChainEventHandler> =
             Arc::clone(&self) as Arc<dyn BlockChainEventHandler>;
 
+        Self::check_peers_health(self.kademlia_net.clone());
+
         BlockChain::start_miner(
-            kademlia.core.keys.clone(),
+            node_key_pair,
             self.block_chain.clone(),
             handler,
             BATCH_PULLING_SIZE,
             BATCH_PULLING_TIME_FRAME,
         );
+    }
+
+    pub(crate) fn check_peers_health(kademlia: Arc<Mutex<DHTNode>>) {
+        let averiguate_len = 5;
+        let duration = Duration::from_secs(60);
+
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(duration).await;
+
+                let kademlia = kademlia.lock().await;
+                let host_node = kademlia.core.clone();
+
+                let mut closest_nodes = match kademlia.node_lookup(&host_node.id).await {
+                    Ok(nodes) => nodes,
+                    _ => continue,
+                };
+
+                closest_nodes.truncate(averiguate_len);
+                closest_nodes.shuffle(&mut rng());
+
+                for try_node in closest_nodes {
+                    match DHTNode::ping(&host_node, &try_node).await {
+                        Ok(_) => continue,
+                        _ => {
+                            let mut routing_table = kademlia.routing_table.lock().await;
+                            routing_table.remove(&try_node);
+                        }
+                    }
+                }
+            }
+        });
     }
 
     pub async fn search_for_block(&self, block_hash: &NodeId) -> Option<Block> {

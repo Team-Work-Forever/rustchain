@@ -74,7 +74,7 @@ impl NetworkNode {
         }
 
         let (host, port) = match &mode {
-            NetworkMode::Bootstrap { host, port } => (host.clone(), *port),
+            NetworkMode::Bootstrap { host, port, .. } => (host.clone(), *port),
             NetworkMode::Join { host, port, .. } => (host.clone(), *port),
             NetworkMode::Client { host, port, .. } => (host.clone(), *port),
         };

@@ -21,6 +21,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         NetworkMode::Bootstrap {
             host: "127.0.0.1".into(),
             port: 3000,
+            bootstraps: vec![],
         },
         std.clone(),
     )
@@ -29,11 +30,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         panic!("Error creating bootstrap");
     };
 
-    let Ok(conn) = bootstrap.get_connection().await else {
+    let Ok(connection) = bootstrap.get_connection().await else {
         panic!("Error fetching pub key");
     };
 
-    let bootstrap_list = vec![conn];
+    let bootstrap_list = vec![connection];
 
     let Some(node1) = NetworkNode::load_node(
         NetworkMode::Join {
