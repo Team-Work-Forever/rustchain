@@ -9,7 +9,10 @@ use rand::{rng, seq::IndexedRandom};
 use tokio::sync::Mutex;
 
 use crate::{
-    blockchain::{Block, BlockChain, BlockChainEventHandler, BlockHeader, DoubleHasher, HashFunc},
+    blockchain::{
+        Block, BlockChain, BlockChainError, BlockChainEventHandler, BlockHeader, DoubleHasher,
+        HashFunc,
+    },
     kademlia::{event::DHTEventHandler, NodeId},
     DHTNode, Node,
 };
@@ -64,9 +67,16 @@ impl NetworkNode {
                     return None;
                 };
 
+                println!("Connecting with peers...");
                 if let None = dht.lock().await.join_network(bootstrap).await {
                     return None;
                 }
+
+                println!("Syncing with network...");
+                if let Err(_) = network_node.sync().await {
+                    return None;
+                }
+                println!("Syncing process completed!");
             }
             _ => {}
         };
@@ -76,9 +86,9 @@ impl NetworkNode {
 
     pub async fn new(mode: NetworkMode) -> Option<Arc<Self>> {
         let (host, port) = match &mode {
-            NetworkMode::Bootstrap { host, port } => (host.clone(), *port),
-            NetworkMode::Join { host, port, .. } => (host.clone(), *port),
-            NetworkMode::Client { host, port, .. } => (host.clone(), *port),
+            NetworkMode::Bootstrap { host, port }
+            | NetworkMode::Join { host, port, .. }
+            | NetworkMode::Client { host, port, .. } => (host.clone(), *port),
         };
 
         let Some(dht) = DHTNode::new(host, port).await else {
@@ -189,8 +199,9 @@ impl NetworkNode {
         for block in self.fetch_block_chain(&search_key, MAX_TTL).await {
             let mut block_chain = self.block_chain.lock().await;
 
-            if let Err(_) = block_chain.append_block(&block) {
-                return Err(());
+            match block_chain.append_block(&block) {
+                Ok(_) | Err(BlockChainError::BlockAlreadyPersisted) => continue,
+                Err(_) => panic!("Failed to sync node"),
             }
         }
 

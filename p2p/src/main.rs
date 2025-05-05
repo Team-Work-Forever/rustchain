@@ -48,7 +48,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         panic!("Error creating node1");
     };
 
-    let Some(node2) = NetworkNode::new(NetworkMode::Join {
+    let Some(_node2) = NetworkNode::new(NetworkMode::Join {
         bootstraps: bootstrap_list,
         host: "127.0.0.1".into(),
         port: 4001,
@@ -57,12 +57,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     else {
         panic!("Error creating node2");
     };
-
-    // if let Err(_) = node2.sync().await {
-    //     panic!("Why");
-    // }
-
-    // return Ok(());
 
     let node_tx = Arc::clone(&node1.block_chain);
     tokio::spawn(async move {
@@ -83,24 +77,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    let node2_tx = Arc::clone(&node2.block_chain);
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(time::Duration::from_secs(20)).await;
-            let node2_tx = node2_tx.lock().await;
+    // let node2_tx = Arc::clone(&node2.block_chain);
+    // tokio::spawn(async move {
+    //     loop {
+    //         tokio::time::sleep(time::Duration::from_secs(20)).await;
+    //         let node2_tx = node2_tx.lock().await;
 
-            match node2_tx.transaction_poll.add_transaction(Transaction::new(
-                "Diogo".to_string(),
-                "OnlyCavas".to_string(),
-                InitAuctionTransaction {
-                    auction_id: "cebolas".into(),
-                },
-            )) {
-                Ok(_) => info!("[💰] Added Transaction"),
-                Err(_) => error!("Error while submitting transaction"),
-            }
-        }
-    });
+    //         match node2_tx.transaction_poll.add_transaction(Transaction::new(
+    //             "Diogo".to_string(),
+    //             "OnlyCavas".to_string(),
+    //             InitAuctionTransaction {
+    //                 auction_id: "cebolas".into(),
+    //             },
+    //         )) {
+    //             Ok(_) => info!("[💰] Added Transaction"),
+    //             Err(_) => error!("Error while submitting transaction"),
+    //         }
+    //     }
+    // });
 
     println!("Node running. Press Ctrl+C to stop.");
 

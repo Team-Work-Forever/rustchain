@@ -168,7 +168,7 @@ impl BlockChain {
         };
 
         if !block.validate(DoubleHasher::default(), block.header.merkle_root) {
-            // if isn't valid then do something to announce that this is a maliciuse fucker
+            // if isn't valid then do something to announce that this is a maliciuse node
             return Err(BlockChainError::InvalidBlock);
         }
 
