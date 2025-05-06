@@ -1,9 +1,9 @@
-use std::{net::SocketAddr, sync::Arc, time};
+use std::{sync::Arc, time};
 
 use log::{error, info};
 use p2p::{
     blockchain::Transaction,
-    cli,
+    cli::{self, Config},
     kademlia::node::Contract,
     logger,
     models::{
@@ -129,29 +129,38 @@ pub async fn test() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+pub fn print_node_info(config: Config) {
+    println!();
+    println!("Type: {}", config.node_type.to_string());
+    println!("Host: {} -> listening on {}", config.host, config.port);
+
+    if let Some(path) = config.out.to_str() {
+        println!("Persisting at {}", path);
+    }
+
+    println!();
+    println!("Loaded Bootstrap nodes:");
+    for bootstrap in config.get_bootstrap_nodes() {
+        println!("\t Host: {} -> {}", bootstrap.host, bootstrap.port);
+    }
+    println!();
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     logger::init_logger("info", "logs", "ledger");
 
-    let args = cli::Arguments::from_with_config();
+    let args = match cli::Arguments::from_with_config() {
+        Ok(args) => args,
+        Err(e) => panic!("{}", e),
+    };
 
     let storage = InFileStorage::new(&args.out);
-    println!("Arguments: {:#?}", args);
-
-    let bootstraps: Vec<Contract> = args
-        .bootstrap
-        .iter()
-        .filter_map(|addr| {
-            addr.parse::<SocketAddr>().ok().map(|socket_addr| Contract {
-                host: socket_addr.ip().to_string(),
-                port: socket_addr.port() as usize,
-            })
-        })
-        .collect();
+    print_node_info(args.clone());
 
     let Some(node) = NetworkNode::load_node(
         NetworkMode {
-            bootstraps,
+            bootstraps: args.get_bootstrap_nodes(),
             host: args.host,
             port: args.port,
         },
