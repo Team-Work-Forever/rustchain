@@ -1,6 +1,5 @@
 use std::{net::SocketAddr, sync::Arc, time};
 
-use clap::Parser;
 use log::{error, info};
 use p2p::{
     blockchain::Transaction,
@@ -134,7 +133,7 @@ pub async fn test() -> Result<(), Box<dyn std::error::Error>> {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     logger::init_logger("info", "logs", "ledger");
 
-    let args = cli::Arguments::parse();
+    let args = cli::Arguments::from_with_config();
 
     let storage = InFileStorage::new(&args.out);
     println!("Arguments: {:#?}", args);

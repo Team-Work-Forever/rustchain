@@ -4,6 +4,7 @@ logs/
 
 # block chain binary
 *.bin
+config.toml
 
 # Ignore todo's
 todo.md
