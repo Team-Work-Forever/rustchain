@@ -6,6 +6,12 @@ use crate::network::grpc::proto::NodeInfo;
 
 use super::{secret_key::SecretPair, ticket::NodeTicket, NodeId, NODE_ID_LENGTH};
 
+#[derive(Clone)]
+pub struct Contract {
+    pub host: String,
+    pub port: usize,
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct Node {
     pub id: NodeId,
@@ -52,6 +58,16 @@ impl Node {
             keys: SecretPair::default(*pub_key),
             address,
             port,
+            ticket: None,
+        }
+    }
+
+    pub fn from_contract(contract: &Contract) -> Self {
+        Self {
+            id: NodeId::new(&[0u8; 32]),
+            keys: SecretPair::default([0u8; 32]),
+            address: contract.host.clone(),
+            port: contract.port,
             ticket: None,
         }
     }

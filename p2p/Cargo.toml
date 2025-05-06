@@ -19,6 +19,7 @@ prost = "0.13"
 tokio = { version = "1.44.2", features = ["full"] }
 thiserror = "2.0.12"
 bincode = {version= "2.0.1", features = ["serde"]}
+clap = { version = "4.5.37", features = ["derive"] }
 
 [build-dependencies]
 tonic-build = "0.13.0"

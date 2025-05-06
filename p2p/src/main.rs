@@ -1,8 +1,11 @@
-use std::{sync::Arc, time};
+use std::{net::SocketAddr, sync::Arc, time};
 
+use clap::Parser;
 use log::{error, info};
 use p2p::{
     blockchain::Transaction,
+    cli,
+    kademlia::node::Contract,
     logger,
     models::{
         network_node::{NetworkMode, NetworkNode},
@@ -12,14 +15,13 @@ use p2p::{
     DHTNode,
 };
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+pub async fn test() -> Result<(), Box<dyn std::error::Error>> {
     logger::init_logger("info", "logs", "ledger");
     let storage = InFileStorage::new("star_wars.bin");
     let std = InFileStorage::new("impire_strikes_back.bin");
 
     let Some(bootstrap) = NetworkNode::load_node(
-        NetworkMode::Bootstrap {
+        NetworkMode {
             host: "127.0.0.1".into(),
             port: 3000,
             bootstraps: vec![],
@@ -31,14 +33,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         panic!("Error creating bootstrap");
     };
 
-    let Ok(connection) = bootstrap.get_connection().await else {
-        panic!("Error fetching pub key");
-    };
-
-    let bootstrap_list = vec![connection];
+    let bootstrap_list = vec![Contract {
+        host: "127.0.0.1".into(),
+        port: 3000,
+    }];
 
     let Some(node1) = NetworkNode::load_node(
-        NetworkMode::Join {
+        NetworkMode {
             bootstraps: bootstrap_list.clone(),
             host: "127.0.0.1".into(),
             port: 4000,
@@ -50,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         panic!("Error creating node1");
     };
 
-    let Some(node2) = NetworkNode::new(NetworkMode::Join {
+    let Some(node2) = NetworkNode::new(NetworkMode {
         bootstraps: bootstrap_list,
         host: "127.0.0.1".into(),
         port: 4001,
@@ -68,7 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         {
             Ok(_) => println!("Yeah"),
-            Err(e) => panic!("Fuck: {}", e),
+            Err(e) => panic!("Error: {}", e),
         }
     }
 
@@ -121,6 +122,54 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if let Err(_) = bootstrap.persist_node(std).await {
+        panic!("Failed to persist node")
+    }
+
+    println!("Shutting down gracefully.");
+
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    logger::init_logger("info", "logs", "ledger");
+
+    let args = cli::Arguments::parse();
+
+    let storage = InFileStorage::new(&args.out);
+    println!("Arguments: {:#?}", args);
+
+    let bootstraps: Vec<Contract> = args
+        .bootstrap
+        .iter()
+        .filter_map(|addr| {
+            addr.parse::<SocketAddr>().ok().map(|socket_addr| Contract {
+                host: socket_addr.ip().to_string(),
+                port: socket_addr.port() as usize,
+            })
+        })
+        .collect();
+
+    let Some(node) = NetworkNode::load_node(
+        NetworkMode {
+            bootstraps,
+            host: args.host,
+            port: args.port,
+        },
+        storage.clone(),
+    )
+    .await
+    else {
+        panic!("Error creating node");
+    };
+
+    println!("Node running. Press Ctrl+C to stop.");
+
+    tokio::signal::ctrl_c()
+        .await
+        .expect("Failed to listen for ctrl+c");
+
+    if let Err(_) = node.persist_node(storage).await {
         panic!("Failed to persist node")
     }
 

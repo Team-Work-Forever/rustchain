@@ -16,7 +16,7 @@ use crate::{
         Block, BlockChain, BlockChainError, BlockChainEventHandler, BlockHeader, DoubleHasher,
         HashFunc,
     },
-    kademlia::{event::DHTEventHandler, NodeId},
+    kademlia::{event::DHTEventHandler, node::Contract, NodeId},
     DHTNode, Node,
 };
 
@@ -24,22 +24,10 @@ pub const BATCH_PULLING_SIZE: usize = 15;
 pub const MAX_TTL: u32 = 1024;
 pub const BATCH_PULLING_TIME_FRAME: Duration = time::Duration::from_secs(1 * 60);
 
-pub enum NetworkMode {
-    Bootstrap {
-        host: String,
-        port: usize,
-        bootstraps: Vec<Node>,
-    },
-    Join {
-        bootstraps: Vec<Node>,
-        host: String,
-        port: usize,
-    },
-    Client {
-        bootstraps: Vec<Node>,
-        host: String,
-        port: usize,
-    },
+pub struct NetworkMode {
+    pub bootstraps: Vec<Contract>,
+    pub host: String,
+    pub port: usize,
 }
 
 #[derive(Debug)]
@@ -65,38 +53,43 @@ impl NetworkNode {
         let network_node = Arc::new(network_node);
         NetworkNode::connect(Arc::clone(&network_node)).await;
 
-        match mode {
-            NetworkMode::Join { bootstraps, .. }
-            | NetworkMode::Client { bootstraps, .. }
-            | NetworkMode::Bootstrap { bootstraps, .. } => {
-                let Some(bootstrap) = bootstraps.choose(&mut rng()).cloned() else {
-                    return Some(network_node);
-                };
+        network_node.join_to_network(mode.bootstraps.clone()).await;
 
-                println!("Connecting with peers...");
-                if let None = dht.lock().await.join_network(bootstrap).await {
-                    return None;
-                }
-
-                println!("Syncing with network...");
-                if let Err(_) = network_node.sync().await {
-                    return None;
-                }
-                println!("Syncing process completed!");
-            }
-        };
+        let network_node_tx = Arc::clone(&network_node);
+        Self::check_peers_health(network_node_tx);
 
         Some(network_node)
     }
 
-    pub async fn new(mode: NetworkMode) -> Option<Arc<Self>> {
-        let (host, port) = match &mode {
-            NetworkMode::Bootstrap { host, port, .. }
-            | NetworkMode::Join { host, port, .. }
-            | NetworkMode::Client { host, port, .. } => (host.clone(), *port),
-        };
+    async fn join_to_network(&self, bootstraps: Vec<Contract>) {
+        println!("Trying to establish connection...");
 
-        let Some(dht) = DHTNode::new(host, port).await else {
+        loop {
+            let Some(bootstrap) = bootstraps.choose(&mut rng()).cloned() else {
+                return;
+            };
+
+            let mut kademlia = self.kademlia_net.lock().await;
+
+            if kademlia.join_network(&bootstrap).await.is_some() {
+                break;
+            }
+
+            println!("Failed to connect. Retrying in 10 seconds...");
+            tokio::time::sleep(Duration::from_secs(10)).await;
+        }
+
+        println!("Syncing with network...");
+
+        if let Err(_) = self.sync().await {
+            return;
+        }
+
+        println!("Syncing process completed!");
+    }
+
+    pub async fn new(mode: NetworkMode) -> Option<Arc<Self>> {
+        let Some(dht) = DHTNode::new(mode.host.clone(), mode.port).await else {
             return None;
         };
 
@@ -116,8 +109,6 @@ impl NetworkNode {
         let handler: Arc<dyn BlockChainEventHandler> =
             Arc::clone(&self) as Arc<dyn BlockChainEventHandler>;
 
-        Self::check_peers_health(self.kademlia_net.clone());
-
         BlockChain::start_miner(
             node_key_pair,
             self.block_chain.clone(),
@@ -127,7 +118,7 @@ impl NetworkNode {
         );
     }
 
-    pub(crate) fn check_peers_health(kademlia: Arc<Mutex<DHTNode>>) {
+    pub(crate) fn check_peers_health(network_node: Arc<NetworkNode>) {
         let averiguate_len = 5;
         let duration = Duration::from_secs(60);
 
@@ -135,20 +126,29 @@ impl NetworkNode {
             loop {
                 tokio::time::sleep(duration).await;
 
-                let kademlia = kademlia.lock().await;
-                let host_node = kademlia.core.clone();
+                let host_node = {
+                    let kademlia = network_node.kademlia_net.lock().await;
+                    kademlia.core.clone()
+                };
 
-                let mut closest_nodes = match kademlia.node_lookup(&host_node.id).await {
-                    Ok(nodes) => nodes,
-                    _ => continue,
+                let mut closest_nodes = {
+                    let kademlia = network_node.kademlia_net.lock().await;
+
+                    match kademlia.node_lookup(&host_node.id).await {
+                        Ok(nodes) => nodes,
+                        _ => continue,
+                    }
                 };
 
                 closest_nodes.truncate(averiguate_len);
                 closest_nodes.shuffle(&mut rng());
 
+                let kademlia = network_node.kademlia_net.lock().await;
                 for try_node in closest_nodes {
                     match DHTNode::ping(&host_node, &try_node).await {
-                        Ok(_) => continue,
+                        Ok(_) => {
+                            continue;
+                        }
                         _ => {
                             let mut routing_table = kademlia.routing_table.lock().await;
                             routing_table.remove(&try_node);

@@ -13,7 +13,7 @@ use crate::network::grpc::proto::{
 
 use super::{
     data::KademliaData, distance::NodeDistance, event::DHTEventHandler, network::GrpcNetwork,
-    routing_table::RoutingTable, ticket::NodeTicket, Node, NodeId, KBUCKET_MAX,
+    node::Contract, routing_table::RoutingTable, ticket::NodeTicket, Node, NodeId, KBUCKET_MAX,
 };
 
 #[derive(Debug, Error)]
@@ -57,18 +57,18 @@ impl DHTNode {
         Some(dth)
     }
 
-    pub async fn join_network(&mut self, bootstrap: Node) -> Option<()> {
+    pub async fn join_network(&mut self, bootstrap: &Contract) -> Option<()> {
         let Some(mut ticket) = NodeTicket::request_challange(&self.core, &bootstrap).await else {
             return None;
         };
 
-        if let None = ticket.submit_challange(&mut self.core, &bootstrap).await {
+        let Some(boostrap_node) = ticket.submit_challange(&mut self.core, &bootstrap).await else {
             return None;
         };
 
         {
             let mut routing_table = self.get_routing_table().await;
-            routing_table.insert_node(&bootstrap).await;
+            routing_table.insert_node(&boostrap_node).await;
         }
 
         let Ok(update_nodes) = self.node_lookup(&self.core.id).await else {
@@ -120,10 +120,7 @@ impl DHTNode {
                 node_id: host.clone().id.into(),
             })
             .await
-            .map_err(|e| {
-                panic!("error: {}", e);
-                return KademliaError::PingFailedError;
-            })?
+            .map_err(|_| KademliaError::PingFailedError)?
             .into_inner();
 
         let target_id =

@@ -10,6 +10,7 @@ use crate::{
 
 use super::{
     network::GrpcNetwork,
+    node::Contract,
     signature::{HandleSignature, Signature},
     Node, NODE_ID_LENGTH,
 };
@@ -113,8 +114,8 @@ impl NodeTicket {
         }
     }
 
-    pub async fn request_challange(host: &Node, bootstrap: &Node) -> Option<NodeTicket> {
-        let Ok(mut client) = GrpcNetwork::handshake(bootstrap.clone())
+    pub async fn request_challange(host: &Node, bootstrap: &Contract) -> Option<NodeTicket> {
+        let Ok(mut client) = GrpcNetwork::handshake(Node::from_contract(bootstrap))
             .await
             .map_err(|_| {
                 return KademliaError::PingFailedError;
@@ -143,8 +144,12 @@ impl NodeTicket {
         Some(NodeTicket::new(pow, response.challange, nonce))
     }
 
-    pub async fn submit_challange(&mut self, host: &mut Node, bootstrap: &Node) -> Option<()> {
-        let Ok(mut client) = GrpcNetwork::handshake(bootstrap.clone())
+    pub async fn submit_challange(
+        &mut self,
+        host: &mut Node,
+        bootstrap: &Contract,
+    ) -> Option<Node> {
+        let Ok(mut client) = GrpcNetwork::handshake(Node::from_contract(bootstrap))
             .await
             .map_err(|_| {
                 return KademliaError::PingFailedError;
@@ -166,16 +171,17 @@ impl NodeTicket {
 
         let response = response.into_inner();
 
-        self.set_signature(
-            utils::to_32bytes(response.pubkey)?,
-            utils::to_64bytes(response.signature)?,
-        );
+        let public_key = utils::to_32bytes(response.pubkey)?;
+        self.set_signature(public_key, utils::to_64bytes(response.signature)?);
 
-        if !self.validate_signature(Some(bootstrap.keys.public_key)) {
+        let bootstrap_node =
+            Node::from_pub_key(&public_key, bootstrap.host.clone(), bootstrap.port);
+
+        if !self.validate_signature(Some(bootstrap_node.keys.public_key)) {
             return None;
         }
 
         host.set_ticket(self);
-        Some(())
+        Some(bootstrap_node)
     }
 }

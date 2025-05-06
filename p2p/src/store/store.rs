@@ -2,7 +2,7 @@ use std::{
     fmt::Debug,
     fs::File,
     io::{self, BufReader, BufWriter, Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use bincode::config;
@@ -38,28 +38,28 @@ pub trait NetworkNodeStorage: Debug {
 }
 
 #[derive(Debug, Clone)]
-pub struct InFileStorage<'a> {
-    storage_location: &'a str,
+pub struct InFileStorage {
+    storage_location: PathBuf,
 }
 
-impl<'a> InFileStorage<'a> {
-    pub fn new(path: &'a str) -> Self {
+impl InFileStorage {
+    pub fn new<P: AsRef<Path>>(path: P) -> Self {
         Self {
-            storage_location: path,
+            storage_location: path.as_ref().to_path_buf(),
         }
     }
 }
 
-impl<'a> NetworkNodeStorage for InFileStorage<'a> {
+impl<'a> NetworkNodeStorage for InFileStorage {
     fn load<TData>(&self) -> Result<TData, StoreError>
     where
         TData: Serialize + for<'de> Deserialize<'de>,
     {
-        if !Path::new(self.storage_location).exists() {
+        if !self.storage_location.as_path().exists() {
             return Err(StoreError::NotFound);
         }
 
-        let bin_file_data = File::open(self.storage_location)?;
+        let bin_file_data = File::open(self.storage_location.clone())?;
         let mut buf_reader = BufReader::new(bin_file_data);
         let mut bin_data = vec![];
 
@@ -77,7 +77,7 @@ impl<'a> NetworkNodeStorage for InFileStorage<'a> {
         TData: Serialize + for<'de> Deserialize<'de> + Debug,
     {
         let config = config::standard();
-        let bin_file_data = File::create(self.storage_location)?;
+        let bin_file_data = File::create(self.storage_location.clone())?;
         let mut buff_writer = BufWriter::new(bin_file_data);
 
         let bin_data = bincode::serde::encode_to_vec(&data, config)?;

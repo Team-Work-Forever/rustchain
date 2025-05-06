@@ -73,13 +73,7 @@ impl NetworkNode {
             return None;
         }
 
-        let (host, port) = match &mode {
-            NetworkMode::Bootstrap { host, port, .. } => (host.clone(), *port),
-            NetworkMode::Join { host, port, .. } => (host.clone(), *port),
-            NetworkMode::Client { host, port, .. } => (host.clone(), *port),
-        };
-
-        let Some(dht) = DHTNode::from(host, port, persist_node.dht).await else {
+        let Some(dht) = DHTNode::from(mode.host.clone(), mode.port, persist_node.dht).await else {
             return None;
         };
 
