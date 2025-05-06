@@ -12,10 +12,7 @@ use rand::{
 use tokio::sync::Mutex;
 
 use crate::{
-    blockchain::{
-        Block, BlockChain, BlockChainError, BlockChainEventHandler, BlockHeader, DoubleHasher,
-        HashFunc,
-    },
+    blockchain::{Block, BlockChain, BlockChainError, BlockChainEventHandler, BlockHeader},
     kademlia::{event::DHTEventHandler, node::Contract, NodeId},
     DHTNode, Node,
 };
@@ -251,14 +248,6 @@ impl NetworkNode {
         Ok(())
     }
 
-    pub(crate) fn get_last_key(node_id: NodeId) -> NodeId {
-        let namespace = format!("chain_head:{}", hex::encode(node_id.0));
-        let hasher = DoubleHasher::default();
-        let key = hasher.hash(namespace);
-
-        NodeId::new(&key)
-    }
-
     pub async fn fetch_last_block_header(&self, tip: Block) -> Option<BlockHeader> {
         let mut candidate_blocks = vec![tip.header];
 
@@ -269,7 +258,7 @@ impl NetworkNode {
         };
 
         while let Some(search_node) = closest_nodes.pop() {
-            let search_key = Self::get_last_key(search_node.id.clone());
+            let search_key = NodeId::create_chain_head(search_node.id.clone());
 
             let block_header = match kademlia.find_value(&search_key).await {
                 Ok(result) => result,

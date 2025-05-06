@@ -7,6 +7,7 @@ use p2p::{
     kademlia::node::Contract,
     logger,
     models::{
+        client_network_node::ClientNetworkNode,
         network_node::{NetworkMode, NetworkNode},
         transactions::InitAuctionTransaction,
     },
@@ -170,6 +171,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     else {
         panic!("Error creating node");
     };
+
+    match args.node_type {
+        cli::NodeType::Client => {
+            let client = ClientNetworkNode::new(node.clone());
+            client.menu();
+        }
+        _ => {}
+    }
 
     println!("Node running. Press Ctrl+C to stop.");
 

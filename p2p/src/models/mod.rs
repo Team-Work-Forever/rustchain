@@ -1,3 +1,5 @@
+pub mod auction;
+pub mod client_network_node;
 pub mod data;
 pub mod event;
 pub mod network_node;

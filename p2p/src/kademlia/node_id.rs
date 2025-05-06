@@ -2,6 +2,8 @@ use rand::{rngs::OsRng, TryRngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::blockchain::{DoubleHasher, HashFunc};
+
 use super::{distance::Distance, NODE_ID_LENGTH};
 
 #[derive(Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
@@ -14,6 +16,22 @@ impl NodeId {
         id.copy_from_slice(&hasher[..NODE_ID_LENGTH]);
 
         NodeId(id)
+    }
+
+    pub fn get_namespace_key(namespace: &str, node_id: NodeId) -> NodeId {
+        let nx = format!("{}:{}", namespace, hex::encode(node_id.0));
+        let hasher = DoubleHasher::default();
+        let key = hasher.hash(nx);
+
+        NodeId::new(&key)
+    }
+
+    pub fn create_chain_head(node_id: NodeId) -> NodeId {
+        Self::get_namespace_key("chain_head", node_id)
+    }
+
+    pub fn create_ticket(node_id: NodeId) -> NodeId {
+        Self::get_namespace_key("ticket", node_id)
     }
 
     pub fn random() -> Option<Self> {

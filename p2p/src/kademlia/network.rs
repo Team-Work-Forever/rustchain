@@ -80,11 +80,13 @@ impl JoinService for GrpcNetwork {
         let pub_key = NodeId::try_from(request.pub_key)
             .map_err(|e| tonic::Status::invalid_argument(format!("Invalid node ID: {}", e)))?;
 
+        let ticket_id = NodeId::create_ticket(pub_key);
+
         let difficulty: u32 = 5;
         let nonce: u32 = rand::rng().random();
 
         let mut dht = self.get_distributed_table().await;
-        dht.insert(pub_key, Ticket::new(nonce, difficulty));
+        dht.insert(ticket_id, Ticket::new(nonce, difficulty));
 
         Ok(Response::new(ChallangeResponse {
             challange: nonce,
@@ -101,8 +103,10 @@ impl JoinService for GrpcNetwork {
         let pub_key = NodeId::try_from(request.pub_key)
             .map_err(|e| tonic::Status::invalid_argument(format!("Invalid node ID: {}", e)))?;
 
+        let ticket_id = NodeId::create_ticket(pub_key.clone());
+
         let mut dht = self.get_distributed_table().await;
-        let Some(ticket) = dht.get(&pub_key) else {
+        let Some(ticket) = dht.get(&ticket_id) else {
             return Err(tonic::Status::not_found("Ticket not found"));
         };
 
@@ -122,7 +126,7 @@ impl JoinService for GrpcNetwork {
             return Err(tonic::Status::unauthenticated("Prof of work invalid"));
         }
 
-        if let None = dht.remove(&pub_key) {
+        if let None = dht.remove(&ticket_id) {
             return Err(tonic::Status::aborted("Failed to update tables"));
         }
 

@@ -84,7 +84,7 @@ impl BlockChainEventHandler for NetworkNode {
                 } else {
                     let last_key = {
                         let kademlia = self.kademlia_net.lock().await;
-                        Self::get_last_key(kademlia.core.id.clone())
+                        NodeId::create_chain_head(kademlia.core.id.clone())
                     };
 
                     let store_stuff = {
