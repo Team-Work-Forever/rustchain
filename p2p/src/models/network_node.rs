@@ -5,6 +5,7 @@ use std::{
     time::{self, Duration},
 };
 
+use log::info;
 use rand::{
     rng,
     seq::{IndexedRandom, SliceRandom},
@@ -19,7 +20,7 @@ use crate::{
 
 pub const BATCH_PULLING_SIZE: usize = 15;
 pub const MAX_TTL: u32 = 1024;
-pub const BATCH_PULLING_TIME_FRAME: Duration = time::Duration::from_secs(1 * 60);
+pub const BATCH_PULLING_TIME_FRAME: Duration = time::Duration::from_secs(10);
 
 pub struct NetworkMode {
     pub bootstraps: Vec<Contract>,
@@ -31,6 +32,7 @@ pub struct NetworkMode {
 pub struct NetworkNode {
     pub block_chain: Arc<Mutex<BlockChain>>,
     pub kademlia_net: Arc<Mutex<DHTNode>>,
+    // ui events ->
 }
 
 impl NetworkNode {
@@ -186,7 +188,7 @@ impl NetworkNode {
         let mut founded_blocks = Vec::<Block>::new();
         let mut visited = HashSet::new();
 
-        let Some(goal_block) = block_chain.get_last_block() else {
+        let Some(goal_block) = block_chain.get_blockchain_head() else {
             return vec![].into_iter();
         };
 
@@ -224,17 +226,19 @@ impl NetworkNode {
     pub async fn sync(&self) -> Result<(), ()> {
         let fetch_chain_head = {
             let block_chain = self.block_chain.lock().await;
-            block_chain.get_last_block().cloned()
+            block_chain.get_blockchain_head().cloned()
         };
 
         let Some(chain_head) = fetch_chain_head else {
             return Err(());
         };
 
+        info!("Fething block... {:#?}", chain_head);
         let Some(last_block) = self.fetch_last_block_header(chain_head).await else {
             return Err(());
         };
 
+        info!("Fething block... {:#?}", last_block);
         let search_key = NodeId::new(&last_block.hash);
         for block in self.fetch_block_chain(&search_key, MAX_TTL).await {
             let mut block_chain = self.block_chain.lock().await;
@@ -245,6 +249,10 @@ impl NetworkNode {
             }
         }
 
+        // It anounces that this block header it's the chain's global head
+        self.update_global_bc_head(&last_block).await;
+
+        println!("blockchain: {:#?}", self.block_chain);
         Ok(())
     }
 
@@ -259,6 +267,7 @@ impl NetworkNode {
 
         while let Some(search_node) = closest_nodes.pop() {
             let search_key = NodeId::create_chain_head(search_node.id.clone());
+            info!("Search Key: {:#?}", search_key);
 
             let block_header = match kademlia.find_value(&search_key).await {
                 Ok(result) => result,
@@ -267,14 +276,17 @@ impl NetworkNode {
                 }
             };
 
+            info!("Checking header:::... {:#?}", block_header);
             let Some(block) = block_header else {
                 continue;
             };
 
+            info!("Checking ref:::... {:#?}", block);
             let Some(block) = block.as_any().downcast_ref::<BlockHeader>() else {
                 continue;
             };
 
+            info!("Gain block: {:#?}", block);
             if !block.validate_signature(search_node.keys.public_key) {
                 continue;
             }

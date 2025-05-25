@@ -83,4 +83,10 @@ impl Block {
         let compute_hash = self.compute_hash(hasher);
         compute_hash == self.header.hash
     }
+
+    pub fn get_transaction<TData: 'static>(&self) -> impl Iterator<Item = (&Transaction, &TData)> {
+        self.transactions
+            .iter()
+            .filter_map(move |tx| tx.get_data::<TData>().map(|data| (tx, data)))
+    }
 }

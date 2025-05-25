@@ -1,15 +1,10 @@
-use std::{sync::Arc, time};
-
-use log::{error, info};
 use p2p::{
-    blockchain::Transaction,
     cli::{self, Config},
     kademlia::node::Contract,
     logger,
     models::{
         client_network_node::ClientNetworkNode,
         network_node::{NetworkMode, NetworkNode},
-        transactions::InitAuctionTransaction,
     },
     store::InFileStorage,
     DHTNode,
@@ -73,24 +68,24 @@ pub async fn test() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let node_tx = Arc::clone(&node1.block_chain);
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(time::Duration::from_secs(15)).await;
-            let node_tx = node_tx.lock().await;
+    // let node_tx = Arc::clone(&node1.block_chain);
+    // tokio::spawn(async move {
+    //     loop {
+    //         tokio::time::sleep(time::Duration::from_secs(15)).await;
+    //         let node_tx = node_tx.lock().await;
 
-            match node_tx.transaction_poll.add_transaction(Transaction::new(
-                "Diogo".to_string(),
-                "OnlyCavas".to_string(),
-                InitAuctionTransaction {
-                    auction_id: "cebolas".into(),
-                },
-            )) {
-                Ok(_) => info!("[💰] Added Transaction"),
-                Err(_) => error!("Error while submitting transaction"),
-            }
-        }
-    });
+    //         match node_tx.transaction_poll.add_transaction(Transaction::new(
+    //             "Diogo".to_string(),
+    //             "OnlyCavas".to_string(),
+    //             InitAuctionTransaction {
+    //                 auction_id: "cebolas".into(),
+    //             },
+    //         )) {
+    //             Ok(_) => info!("[💰] Added Transaction"),
+    //             Err(_) => error!("Error while submitting transaction"),
+    //         }
+    //     }
+    // });
 
     // let node2_tx = Arc::clone(&node2.block_chain);
     // tokio::spawn(async move {
@@ -175,22 +170,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match args.node_type {
         cli::NodeType::Client => {
             let client = ClientNetworkNode::new(node.clone());
-            client.menu();
+            client.init_ui().await?;
         }
-        _ => {}
+        cli::NodeType::Join => {
+            println!("Node running. Press Ctrl+C to stop.");
+
+            tokio::signal::ctrl_c()
+                .await
+                .expect("Failed to listen for ctrl+c");
+        }
     }
-
-    println!("Node running. Press Ctrl+C to stop.");
-
-    tokio::signal::ctrl_c()
-        .await
-        .expect("Failed to listen for ctrl+c");
 
     if let Err(_) = node.persist_node(storage).await {
         panic!("Failed to persist node")
     }
-
-    println!("Shutting down gracefully.");
 
     Ok(())
 }

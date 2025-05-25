@@ -6,6 +6,7 @@ logs/
 *.bin
 bin/
 config.toml
+config/
 
 # Ignore todo's
 todo.md

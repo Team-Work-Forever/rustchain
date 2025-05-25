@@ -71,13 +71,17 @@ impl DHTNode {
             routing_table.insert_node(&boostrap_node).await;
         }
 
-        let Ok(update_nodes) = self.node_lookup(&self.core.id).await else {
-            return None;
+        let nodes = {
+            let Ok(update_nodes) = self.node_lookup(&self.core.id).await else {
+                return None;
+            };
+
+            update_nodes
         };
 
         {
             let mut routing_table = self.get_routing_table().await;
-            for node in update_nodes {
+            for node in nodes {
                 routing_table.insert_node(&node).await;
             }
         }

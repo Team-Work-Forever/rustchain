@@ -114,7 +114,7 @@ impl BlockChain {
                 };
 
                 let Some(block) = block else {
-                    return;
+                    continue;
                 };
 
                 let event_handler = Arc::clone(&event_handler);
@@ -125,14 +125,43 @@ impl BlockChain {
         });
     }
 
-    pub fn search_blocks_on<PerdicateFn>(
+    fn get_block_by_hash(&self, hash: [u8; 32]) -> Option<&Block> {
+        if let Some(position) = self
+            .blocks
+            .iter()
+            .position(|block| block.header.hash == hash)
+        {
+            return self.blocks.get(position);
+        }
+
+        None
+    }
+
+    pub fn get_blockchain_head(&self) -> Option<&Block> {
+        self.blocks.iter().max_by_key(|block| block.header.index)
+    }
+
+    pub fn search_blocks_on<PredicateFn>(
         &self,
-        perdicate: PerdicateFn,
+        predicate: PredicateFn,
     ) -> impl Iterator<Item = &Block>
     where
-        PerdicateFn: Fn(&Block) -> bool,
+        PredicateFn: Fn(&Block) -> bool,
     {
-        self.blocks.iter().filter(move |block| perdicate(*block))
+        let mut chain = Vec::new();
+        let tip = self
+            .get_blockchain_head()
+            .expect("Failed to find the tip of the chain");
+
+        let mut current = Some(tip);
+
+        while let Some(block) = current {
+            chain.push(block);
+            current = self.get_block_by_hash(block.header.prev_hash);
+        }
+
+        chain.reverse();
+        chain.into_iter().filter(move |block| predicate(*block))
     }
 
     pub fn search_transactions_on<PerdicateFn>(
@@ -153,7 +182,7 @@ impl BlockChain {
     }
 
     pub fn append_block(&mut self, block: &Block) -> Result<(), BlockChainError> {
-        // verify the signature of the block
+        // TODO: verify the signature of the block
 
         if self
             .search_blocks_on(|b| b.header.hash == block.header.hash)
@@ -163,7 +192,7 @@ impl BlockChain {
             return Err(BlockChainError::BlockAlreadyPersisted);
         }
 
-        let Some(prev_block) = self.get_last_block() else {
+        let Some(prev_block) = self.get_blockchain_head() else {
             return Err(BlockChainError::BlockNotFound);
         };
 
@@ -210,9 +239,5 @@ impl BlockChain {
             .len()
             .try_into()
             .expect("Block count exceeds u64::MAX")
-    }
-
-    pub fn get_last_block(&self) -> Option<&Block> {
-        self.blocks.last()
     }
 }

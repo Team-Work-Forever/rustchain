@@ -1,4 +1,4 @@
-pub mod auction;
+pub mod auctions;
 pub mod client_network_node;
 pub mod data;
 pub mod event;
