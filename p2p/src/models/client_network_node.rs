@@ -73,6 +73,16 @@ impl ClientNetworkNode {
         start_price: Currency,
         goal_price: Currency,
     ) -> Option<Transaction> {
+        if start_price <= 0 || goal_price <= 0 {
+            info!("Start price and goal price must be greater than zero.");
+            return None;
+        }
+
+        if start_price > goal_price {
+            info!("Start price must be less than or equal to goal price.");
+            return None;
+        }
+
         self.append_transaction(AuctionTransaction::Create(CreateAuction::new(
             item,
             start_price,
@@ -400,8 +410,18 @@ impl ClientNetworkNode {
                 Err(_) => continue,
             };
 
-            self.create_auction(Item::new(name, description), start_price, goal_price)
-                .await;
+            if let None = self
+                .create_auction(Item::new(name, description), start_price, goal_price)
+                .await
+            {
+                term::println(
+                    "Please provide valid values to create a auction",
+                    style::Color::Red,
+                )?;
+                term::wait_for_enter()?;
+
+                continue;
+            }
 
             break;
         }
