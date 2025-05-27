@@ -51,6 +51,7 @@ impl ClientNetworkNode {
     async fn append_transaction(&self, tx_action: AuctionTransaction) -> Option<Transaction> {
         let transaction = Transaction::new(self.key_pair.clone(), tx_action)?;
         let block_chain = Arc::clone(&self.network_node.block_chain);
+
         {
             let Ok(block_tx) = block_chain.try_lock() else {
                 return None;
@@ -540,6 +541,9 @@ impl ClientNetworkNode {
         term::print_title("=== Find Value ===", style::Color::Cyan)?;
         term::move_cursor(0, 4)?;
         term::println("Enter the value to find:", style::Color::Yellow)?;
+
+        // TODO: Modify this
+        term::wait_for_enter()?;
 
         Ok(())
     }

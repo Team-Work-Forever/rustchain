@@ -38,7 +38,6 @@ impl DHTEventHandler for NetworkNode {
                             let block_key = NodeId::new(&block.header.hash);
                             let block = block.clone();
 
-                            // repropagate the block to the network
                             let kademlia = Arc::clone(&self.kademlia_net);
                             tokio::spawn(async move {
                                 if let Ok(kademlia) = kademlia.try_lock() {
@@ -97,7 +96,7 @@ impl NetworkNode {
                 return;
             };
 
-            info!("Chain Tip Key: {}", hex::encode(kademlia.core.id.0));
+            // info!("Chain Tip Key: {}", hex::encode(kademlia.core.id.0));
             NodeId::create_chain_head(kademlia.core.id.clone())
         };
 

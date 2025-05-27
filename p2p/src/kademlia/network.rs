@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use log::info;
 use rand::Rng;
 use tokio::sync::Mutex;
-use tonic::{Request, Response, Status};
+use tonic::{Response, Status};
 
 use crate::{
     blockchain::DoubleHasher,
@@ -48,27 +48,6 @@ impl GrpcNetwork {
             distributed_hashing_table,
             event_handler,
         }
-    }
-
-    async fn persist_incoming_node<TRequest>(
-        &self,
-        request: &Request<TRequest>,
-    ) -> Result<(), Status> {
-        let routing_table = Arc::clone(&self.routing_table);
-        let incoming_node = self.get_peer(&request)?;
-
-        if let Ok(mut routing_table) = routing_table.try_lock() {
-            routing_table.insert_node(&incoming_node).await;
-            return Ok(());
-        }
-
-        info!(
-            "Failed to lock routing table for persisting incoming node: {:#?}",
-            incoming_node
-        );
-        return Err(Status::aborted(
-            "Failed to lock routing table for persisting incoming node",
-        ));
     }
 }
 
@@ -182,10 +161,7 @@ impl KademliaService for GrpcNetwork {
         &self,
         request: tonic::Request<StoreRequest>,
     ) -> Result<tonic::Response<StoreResponse>, tonic::Status> {
-        {
-            self.persist_incoming_node(&request).await?;
-        }
-
+        let incoming_node = self.get_peer(&request)?;
         let request = request.into_inner();
 
         let key = NodeId::try_from(request.key.clone())
@@ -214,9 +190,21 @@ impl KademliaService for GrpcNetwork {
                 ));
             };
 
-            info!("DHT: {:#?}", dht);
             dht.insert(key.clone(), decoded_value.clone());
-            info!("Stored: {:#?} -> {:#?}", key, decoded_value);
+        }
+
+        let routing_table = Arc::clone(&self.routing_table);
+
+        {
+            if let Ok(mut routing_table) = routing_table.try_lock() {
+                routing_table.insert_node(&incoming_node).await;
+                info!("Persisted incoming node: {:#?}", incoming_node);
+            } else {
+                info!(
+                    "Failed to lock routing table for persisting incoming node: {:#?} On Store",
+                    incoming_node
+                );
+            }
         }
 
         Ok(Response::new(StoreResponse { key: key.into() }))
@@ -226,10 +214,7 @@ impl KademliaService for GrpcNetwork {
         &self,
         request: tonic::Request<FindNodeRequest>,
     ) -> Result<tonic::Response<FindNodeResponse>, tonic::Status> {
-        {
-            self.persist_incoming_node(&request).await?;
-        }
-
+        let incoming_node = self.get_peer(&request)?;
         let request = request.into_inner();
 
         let count = {
@@ -244,7 +229,7 @@ impl KademliaService for GrpcNetwork {
             .map_err(|e| tonic::Status::invalid_argument(format!("Invalid node ID: {}", e)))?;
 
         let routing_table = Arc::clone(&self.routing_table);
-        let routing_table = {
+        let mut routing_table = {
             let Ok(routing_table) = routing_table.try_lock() else {
                 return Err(tonic::Status::aborted(
                     "Failed to lock routing table for finding nodes",
@@ -254,6 +239,8 @@ impl KademliaService for GrpcNetwork {
             routing_table
         };
 
+        // keep record of the incoming node for future requests
+        routing_table.insert_node(&incoming_node).await;
         let closest_nodes = routing_table.get_closest_nodes(&lookup_id, count);
 
         let response = closest_nodes
@@ -268,10 +255,7 @@ impl KademliaService for GrpcNetwork {
         &self,
         request: tonic::Request<FindValueRequest>,
     ) -> Result<tonic::Response<FindValueResponse>, tonic::Status> {
-        {
-            self.persist_incoming_node(&request).await?;
-        }
-
+        let incoming_node = self.get_peer(&request)?;
         let request = request.into_inner();
 
         let key = NodeId::try_from(request.key)
@@ -299,8 +283,7 @@ impl KademliaService for GrpcNetwork {
         };
 
         let routing_table = Arc::clone(&self.routing_table);
-
-        let routing_table = {
+        let mut routing_table = {
             let Ok(routing_table) = routing_table.try_lock() else {
                 return Err(Status::aborted(
                     "Failed to lock routing table for finding nodes",
@@ -310,6 +293,8 @@ impl KademliaService for GrpcNetwork {
             routing_table
         };
 
+        // keep record of the incoming node for future requests
+        routing_table.insert_node(&incoming_node).await;
         let closest_nodes = routing_table.get_closest_nodes(&key, KBUCKET_MAX);
 
         let response = closest_nodes
