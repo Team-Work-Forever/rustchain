@@ -77,15 +77,27 @@ impl Auction {
         self.cancel_at = Utc::now().timestamp()
     }
 
+    pub fn get_state(&self) -> String {
+        if self.is_canceled() {
+            return "Canceled".to_string();
+        }
+
+        if self.is_terminated() {
+            return "Terminated".to_string();
+        }
+
+        "Open".to_string()
+    }
+
     fn is_canceled(&self) -> bool {
         self.cancel_at != 0
     }
 
-    fn is_terminated(&self) -> bool {
+    pub fn is_terminated(&self) -> bool {
         self.ended_at != 0
     }
 
-    fn can_modify(&self) -> bool {
+    pub fn can_modify(&self) -> bool {
         !self.is_canceled() || !self.is_terminated()
     }
 
@@ -99,6 +111,10 @@ impl Auction {
 
     pub fn add_bid(&mut self, bid: Bid) {
         if !self.can_modify() {
+            return;
+        }
+
+        if bid.buyer == self.seller {
             return;
         }
 
@@ -121,10 +137,12 @@ impl Auction {
     }
 
     pub fn get_last_five_bids(&self) -> Vec<Bid> {
-        self.history.iter().take(5).cloned().collect()
+        let mut history = self.history.clone();
+        history.sort_by(|a, b| b.amount.cmp(&a.amount));
+        history.iter().take(5).cloned().collect()
     }
 
-    pub fn get_winner(&self) -> Result<PublicKey, AuctionError> {
+    pub fn get_winner(&self) -> Result<Bid, AuctionError> {
         if !self.is_terminated() {
             return Err(AuctionError::StillRunning);
         }
@@ -133,6 +151,6 @@ impl Auction {
             return Err(AuctionError::FailedToFetchHighestBid);
         };
 
-        Ok(highest_bid.buyer)
+        Ok(highest_bid)
     }
 }
