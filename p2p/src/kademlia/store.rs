@@ -40,7 +40,10 @@ impl DHTNode {
     }
 
     pub async fn into_persist(&self) -> PersistDHTNode {
-        let dht = self.distributed_hash_tb.lock().await;
+        let dht_tx = Arc::clone(&self.distributed_hash_tb);
+        let Ok(dht) = dht_tx.try_lock() else {
+            panic!("Failed to lock distributed hash table for persisting");
+        };
 
         PersistDHTNode {
             core: self.core.clone(),

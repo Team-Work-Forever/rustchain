@@ -35,20 +35,37 @@ impl ClientNetworkNode {
     }
 
     async fn append_transaction(&self, tx_action: AuctionTransaction) -> Option<Transaction> {
-        let block_tx = self.network_node.block_chain.lock().await;
-        let kademlia_tx = self.network_node.kademlia_net.lock().await;
+        let kademlia_net = Arc::clone(&self.network_node.kademlia_net);
+        info!("Lock here 1");
 
-        let transaction = Transaction::new(kademlia_tx.core.keys.clone(), tx_action)?;
+        let transaction = {
+            let Ok(kademlia_tx) = kademlia_net.try_lock() else {
+                return None;
+            };
 
-        match block_tx
-            .transaction_poll
-            .add_transaction(transaction.clone())
+            Transaction::new(kademlia_tx.core.keys.clone(), tx_action)?
+        };
+        info!("UnLock here 1");
+
+        let block_chain = Arc::clone(&self.network_node.block_chain);
         {
-            Ok(_) => {
-                info!("Added transaction");
-                Some(transaction)
+            info!("Lock here 2");
+            let Ok(block_tx) = block_chain.try_lock() else {
+                return None;
+            };
+
+            info!("UnLock here 2");
+
+            match block_tx
+                .transaction_poll
+                .add_transaction(transaction.clone())
+            {
+                Ok(_) => {
+                    info!("Added transaction");
+                    Some(transaction)
+                }
+                Err(_) => None,
             }
-            Err(_) => None,
         }
     }
 
@@ -85,7 +102,10 @@ impl ClientNetworkNode {
 
     pub async fn get_auctions(&self) -> Vec<Auction> {
         let mut auctions: HashMap<Uuid, Auction> = HashMap::new();
-        let block_chain_tx = self.network_node.block_chain.lock().await;
+        let block_chain = Arc::clone(&self.network_node.block_chain);
+        let Ok(block_chain_tx) = block_chain.try_lock() else {
+            return vec![];
+        };
 
         for block in block_chain_tx.search_blocks_on(|_| true) {
             for (transaction, auction) in block.get_transaction::<AuctionTransaction>() {

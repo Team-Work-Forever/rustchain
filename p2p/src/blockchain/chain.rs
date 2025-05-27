@@ -84,24 +84,17 @@ impl BlockChain {
             loop {
                 tokio::time::sleep(batch_pulling).await;
 
-                let block = {
-                    let mut block_chain = block_chain.lock().await;
+                let block_chain = Arc::clone(&block_chain);
+                let transactions = {
+                    let Ok(mut block_chain) = block_chain.try_lock() else {
+                        continue;
+                    };
 
                     match block_chain
                         .transaction_poll
                         .fetch_batch_transactions(batch_size)
                     {
-                        Ok(transactions) if !transactions.is_empty() => {
-                            let block = block_chain.add_block(|mut builder| {
-                                builder
-                                    .add_transactions(transactions)
-                                    .sign_with(pair.clone());
-
-                                builder
-                            });
-
-                            Some(block)
-                        }
+                        Ok(transactions) if !transactions.is_empty() => Some(transactions),
                         Ok(_) => {
                             info!("No transactions to be added");
                             None
@@ -113,14 +106,32 @@ impl BlockChain {
                     }
                 };
 
-                let Some(block) = block else {
+                let Some(transactions) = transactions else {
                     continue;
                 };
 
-                let event_handler = Arc::clone(&event_handler);
-                event_handler
-                    .on_event(BlockChainEvent::AddBlock(block))
-                    .await;
+                let block_chain_tx = Arc::clone(&block_chain);
+                let block = {
+                    let Ok(mut block_chain) = block_chain_tx.try_lock() else {
+                        continue;
+                    };
+
+                    block_chain.add_block(|mut builder| {
+                        builder
+                            .add_transactions(transactions)
+                            .sign_with(pair.clone());
+
+                        builder
+                    })
+                };
+
+                info!("Not understanding");
+                {
+                    let event_handler = Arc::clone(&event_handler);
+                    event_handler
+                        .on_event(BlockChainEvent::AddBlock(block))
+                        .await;
+                }
             }
         });
     }

@@ -4,8 +4,9 @@ use std::{
     sync::Arc,
 };
 
+use log::info;
 use thiserror::Error;
-use tokio::sync::{Mutex, MutexGuard};
+use tokio::sync::Mutex;
 
 use crate::network::grpc::proto::{
     find_value_response::Resp, FindNodeRequest, FindValueRequest, PingRequest, StoreRequest,
@@ -66,9 +67,12 @@ impl DHTNode {
             return None;
         };
 
+        let routing_table = Arc::clone(&self.routing_table);
         {
-            let mut routing_table = self.get_routing_table().await;
-            routing_table.insert_node(&boostrap_node).await;
+            if let Ok(mut routing_table) = routing_table.try_lock() {
+                info!("Init insert");
+                routing_table.insert_node(&boostrap_node).await;
+            }
         }
 
         let nodes = {
@@ -76,13 +80,17 @@ impl DHTNode {
                 return None;
             };
 
+            info!("More nodes");
             update_nodes
         };
 
+        let routing_table = Arc::clone(&self.routing_table);
         {
-            let mut routing_table = self.get_routing_table().await;
             for node in nodes {
-                routing_table.insert_node(&node).await;
+                if let Ok(mut routing_table) = routing_table.try_lock() {
+                    routing_table.insert_node(&node).await;
+                    info!("Insert each one");
+                }
             }
         }
 
@@ -102,14 +110,6 @@ impl DHTNode {
                 panic!("failed to spawn a grpc connection");
             }
         });
-    }
-
-    async fn get_routing_table(&self) -> MutexGuard<RoutingTable> {
-        self.routing_table.lock().await
-    }
-
-    async fn get_dth_table(&self) -> MutexGuard<HashMap<NodeId, Box<dyn KademliaData>>> {
-        self.distributed_hash_tb.lock().await
     }
 
     pub async fn ping(host: &Node, target: &Node) -> Result<(), KademliaError> {
@@ -151,6 +151,7 @@ impl DHTNode {
             return Err(KademliaError::StoreFailedError);
         };
 
+        info!("Closest nodes: {:#?}", closest_nodes);
         for node in closest_nodes.clone() {
             let Ok(mut client) = GrpcNetwork::connect_over(self.core.clone(), node.clone()).await
             else {
@@ -177,10 +178,12 @@ impl DHTNode {
             }
         }
 
+        let dht_tx = Arc::clone(&self.distributed_hash_tb);
         if closest_nodes.iter().any(|n| n.id == self.core.id) {
-            self.get_dth_table().await.insert(key.clone(), value);
-
-            has_stored = true;
+            if let Ok(mut dth_table) = dht_tx.try_lock() {
+                dth_table.insert(key.clone(), value);
+                has_stored = true;
+            }
         }
 
         return if has_stored {
@@ -191,7 +194,11 @@ impl DHTNode {
     }
 
     pub async fn node_lookup(&self, target_id: &NodeId) -> Result<Vec<Node>, KademliaError> {
-        let routing_table = self.get_routing_table().await;
+        let routing_table = Arc::clone(&self.routing_table);
+
+        let Ok(routing_table) = routing_table.try_lock() else {
+            return Err(KademliaError::FailedAccessError);
+        };
 
         let mut visited_nodes = HashSet::<NodeId>::new();
         let mut closest_nodes = Vec::new();
@@ -263,9 +270,18 @@ impl DHTNode {
         &self,
         key: &NodeId,
     ) -> Result<Option<Box<dyn KademliaData>>, KademliaError> {
-        let routing_table = self.get_routing_table().await;
+        let routing_table = Arc::clone(&self.routing_table);
+        let Ok(routing_table) = routing_table.try_lock() else {
+            return Err(KademliaError::FailedAccessError);
+        };
 
         // self, search for the value first!
+        let dht_tx = Arc::clone(&self.distributed_hash_tb);
+        if let Ok(dht) = dht_tx.try_lock() {
+            if let Some(value) = dht.get(key) {
+                return Ok(Some(value.clone()));
+            }
+        }
 
         let mut visited_nodes = HashSet::<NodeId>::new();
         let mut check_nodes = VecDeque::from(routing_table.get_closest_nodes(&key, KBUCKET_MAX));
@@ -322,7 +338,9 @@ impl DHTNode {
                     return Ok(Some(decoded_value));
                 }
 
-                None => continue,
+                None => {
+                    continue;
+                }
             }
         }
 

@@ -1,7 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
+use log::info;
 use rand::Rng;
-use tokio::sync::{Mutex, MutexGuard};
+use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 
 use crate::{
@@ -49,23 +50,25 @@ impl GrpcNetwork {
         }
     }
 
-    async fn get_routing_table(&self) -> MutexGuard<RoutingTable> {
-        self.routing_table.lock().await
-    }
-
-    async fn get_distributed_table(&self) -> MutexGuard<HashMap<NodeId, Box<dyn KademliaData>>> {
-        self.distributed_hashing_table.lock().await
-    }
-
     async fn persist_incoming_node<TRequest>(
         &self,
         request: &Request<TRequest>,
-    ) -> Result<MutexGuard<RoutingTable>, Status> {
-        let mut routing_table = self.get_routing_table().await;
+    ) -> Result<(), Status> {
+        let routing_table = Arc::clone(&self.routing_table);
         let incoming_node = self.get_peer(&request)?;
 
-        routing_table.insert_node(&incoming_node).await;
-        Ok(routing_table)
+        if let Ok(mut routing_table) = routing_table.try_lock() {
+            routing_table.insert_node(&incoming_node).await;
+            return Ok(());
+        }
+
+        info!(
+            "Failed to lock routing table for persisting incoming node: {:#?}",
+            incoming_node
+        );
+        return Err(Status::aborted(
+            "Failed to lock routing table for persisting incoming node",
+        ));
     }
 }
 
@@ -85,8 +88,20 @@ impl JoinService for GrpcNetwork {
         let difficulty: u32 = 5;
         let nonce: u32 = rand::rng().random();
 
-        let mut dht = self.get_distributed_table().await;
-        dht.insert(ticket_id, Ticket::new(nonce, difficulty));
+        let dht_clone = Arc::clone(&self.distributed_hashing_table);
+        {
+            if let Ok(mut dht) = dht_clone.try_lock() {
+                if dht.contains_key(&ticket_id) {
+                    return Err(tonic::Status::already_exists("Ticket already exists"));
+                }
+
+                dht.insert(ticket_id, Ticket::new(nonce, difficulty));
+            } else {
+                return Err(tonic::Status::aborted(
+                    "Failed to lock DHT for inserting ticket",
+                ));
+            }
+        }
 
         Ok(Response::new(ChallangeResponse {
             challange: nonce,
@@ -105,7 +120,17 @@ impl JoinService for GrpcNetwork {
 
         let ticket_id = NodeId::create_ticket(pub_key.clone());
 
-        let mut dht = self.get_distributed_table().await;
+        let dht_clone = Arc::clone(&self.distributed_hashing_table);
+        let mut dht = {
+            let Ok(dht) = dht_clone.try_lock() else {
+                return Err(tonic::Status::aborted(
+                    "Failed to lock DHT for fetching ticket",
+                ));
+            };
+
+            dht
+        };
+
         let Some(ticket) = dht.get(&ticket_id) else {
             return Err(tonic::Status::not_found("Ticket not found"));
         };
@@ -157,7 +182,10 @@ impl KademliaService for GrpcNetwork {
         &self,
         request: tonic::Request<StoreRequest>,
     ) -> Result<tonic::Response<StoreResponse>, tonic::Status> {
-        let _ = self.persist_incoming_node(&request).await?;
+        {
+            self.persist_incoming_node(&request).await?;
+        }
+
         let request = request.into_inner();
 
         let key = NodeId::try_from(request.key.clone())
@@ -170,13 +198,26 @@ impl KademliaService for GrpcNetwork {
             return Err(tonic::Status::aborted("Failed to decode value"));
         };
 
-        let mut dht = self.get_distributed_table().await;
+        {
+            let event_handler = Arc::clone(&self.event_handler);
 
-        dht.insert(key.clone(), decoded_value.clone());
+            event_handler
+                .on_event(DHTEvent::Store(decoded_value.clone()))
+                .await;
+        }
 
-        self.event_handler
-            .on_event(DHTEvent::Store(decoded_value))
-            .await;
+        {
+            let dht_clone = Arc::clone(&self.distributed_hashing_table);
+            let Ok(mut dht) = dht_clone.try_lock() else {
+                return Err(tonic::Status::aborted(
+                    "Failed to lock DHT for storing value",
+                ));
+            };
+
+            info!("DHT: {:#?}", dht);
+            dht.insert(key.clone(), decoded_value.clone());
+            info!("Stored: {:#?} -> {:#?}", key, decoded_value);
+        }
 
         Ok(Response::new(StoreResponse { key: key.into() }))
     }
@@ -185,7 +226,10 @@ impl KademliaService for GrpcNetwork {
         &self,
         request: tonic::Request<FindNodeRequest>,
     ) -> Result<tonic::Response<FindNodeResponse>, tonic::Status> {
-        let routing_table = self.persist_incoming_node(&request).await?;
+        {
+            self.persist_incoming_node(&request).await?;
+        }
+
         let request = request.into_inner();
 
         let count = {
@@ -198,6 +242,17 @@ impl KademliaService for GrpcNetwork {
 
         let lookup_id = NodeId::try_from(request.key)
             .map_err(|e| tonic::Status::invalid_argument(format!("Invalid node ID: {}", e)))?;
+
+        let routing_table = Arc::clone(&self.routing_table);
+        let routing_table = {
+            let Ok(routing_table) = routing_table.try_lock() else {
+                return Err(tonic::Status::aborted(
+                    "Failed to lock routing table for finding nodes",
+                ));
+            };
+
+            routing_table
+        };
 
         let closest_nodes = routing_table.get_closest_nodes(&lookup_id, count);
 
@@ -213,13 +268,23 @@ impl KademliaService for GrpcNetwork {
         &self,
         request: tonic::Request<FindValueRequest>,
     ) -> Result<tonic::Response<FindValueResponse>, tonic::Status> {
-        let routing_table = self.persist_incoming_node(&request).await?;
+        {
+            self.persist_incoming_node(&request).await?;
+        }
+
         let request = request.into_inner();
 
         let key = NodeId::try_from(request.key)
             .map_err(|e| Status::invalid_argument(format!("Invalid node ID: {}", e)))?;
 
-        let dht = self.get_distributed_table().await;
+        let dht_clone = Arc::clone(&self.distributed_hashing_table);
+        let dht = {
+            let Ok(dht) = dht_clone.try_lock() else {
+                return Err(Status::aborted("Failed to lock DHT for finding value"));
+            };
+
+            dht
+        };
 
         if let Some(value) = dht.get(&key) {
             let config = bincode::config::standard();
@@ -231,6 +296,18 @@ impl KademliaService for GrpcNetwork {
             return Ok(Response::new(FindValueResponse {
                 resp: Some(Resp::Value(encoded_data)),
             }));
+        };
+
+        let routing_table = Arc::clone(&self.routing_table);
+
+        let routing_table = {
+            let Ok(routing_table) = routing_table.try_lock() else {
+                return Err(Status::aborted(
+                    "Failed to lock routing table for finding nodes",
+                ));
+            };
+
+            routing_table
         };
 
         let closest_nodes = routing_table.get_closest_nodes(&key, KBUCKET_MAX);

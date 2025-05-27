@@ -32,7 +32,6 @@ pub struct NetworkMode {
 pub struct NetworkNode {
     pub block_chain: Arc<Mutex<BlockChain>>,
     pub kademlia_net: Arc<Mutex<DHTNode>>,
-    // ui events ->
 }
 
 impl NetworkNode {
@@ -52,10 +51,14 @@ impl NetworkNode {
         let network_node = Arc::new(network_node);
         NetworkNode::connect(Arc::clone(&network_node)).await;
 
-        network_node.join_to_network(mode.bootstraps.clone()).await;
+        {
+            network_node.join_to_network(mode.bootstraps.clone()).await;
+        }
 
-        let network_node_tx = Arc::clone(&network_node);
-        Self::check_peers_health(network_node_tx);
+        {
+            let network_node_tx = Arc::clone(&network_node);
+            Self::check_peers_health(network_node_tx);
+        }
 
         Some(network_node)
     }
@@ -68,10 +71,16 @@ impl NetworkNode {
                 return;
             };
 
-            let mut kademlia = self.kademlia_net.lock().await;
+            let kademlia_net = Arc::clone(&self.kademlia_net);
+            {
+                let Ok(mut kademlia) = kademlia_net.try_lock() else {
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                    continue;
+                };
 
-            if kademlia.join_network(&bootstrap).await.is_some() {
-                break;
+                if kademlia.join_network(&bootstrap).await.is_some() {
+                    break;
+                }
             }
 
             println!("Failed to connect. Retrying in 10 seconds...");
@@ -98,10 +107,13 @@ impl NetworkNode {
     pub(crate) async fn connect(self: Arc<Self>) {
         let handler: Arc<dyn DHTEventHandler> = Arc::clone(&self) as Arc<dyn DHTEventHandler>;
 
+        let kademlia_net = Arc::clone(&self.kademlia_net);
         let node_key_pair = {
-            let kademlia = self.kademlia_net.lock().await;
-            kademlia.init_grpc_connection(Arc::clone(&handler));
+            let Ok(kademlia) = kademlia_net.try_lock() else {
+                return;
+            };
 
+            kademlia.init_grpc_connection(Arc::clone(&handler));
             kademlia.core.keys.clone()
         };
 
@@ -119,38 +131,56 @@ impl NetworkNode {
 
     pub(crate) fn check_peers_health(network_node: Arc<NetworkNode>) {
         let averiguate_len = 5;
-        let duration = Duration::from_secs(60);
+        let duration = Duration::from_secs(10);
 
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(duration).await;
+                info!("Checking peers health...");
 
+                let kademlia_net = Arc::clone(&network_node.kademlia_net);
                 let host_node = {
-                    let kademlia = network_node.kademlia_net.lock().await;
+                    let Ok(kademlia) = kademlia_net.try_lock() else {
+                        continue;
+                    };
+
                     kademlia.core.clone()
                 };
 
                 let mut closest_nodes = {
-                    let kademlia = network_node.kademlia_net.lock().await;
+                    let kademlia_net = Arc::clone(&network_node.kademlia_net);
+                    let Ok(kademlia) = kademlia_net.try_lock() else {
+                        continue;
+                    };
 
                     match kademlia.node_lookup(&host_node.id).await {
                         Ok(nodes) => nodes,
-                        _ => continue,
+                        _ => {
+                            info!("Don't understand");
+                            continue;
+                        }
                     }
                 };
 
                 closest_nodes.truncate(averiguate_len);
                 closest_nodes.shuffle(&mut rng());
 
-                let kademlia = network_node.kademlia_net.lock().await;
+                let kademlia_net = Arc::clone(&network_node.kademlia_net);
+                let Ok(kademlia) = kademlia_net.try_lock() else {
+                    continue;
+                };
+
+                let routing_table = Arc::clone(&kademlia.routing_table);
                 for try_node in closest_nodes {
                     match DHTNode::ping(&host_node, &try_node).await {
                         Ok(_) => {
                             continue;
                         }
                         _ => {
-                            let mut routing_table = kademlia.routing_table.lock().await;
-                            routing_table.remove(&try_node);
+                            if let Ok(mut routing_table) = routing_table.try_lock() {
+                                info!("Removing node: {:#?}", try_node);
+                                routing_table.remove(&try_node);
+                            }
                         }
                     }
                 }
@@ -159,11 +189,17 @@ impl NetworkNode {
     }
 
     pub async fn search_for_block(&self, block_hash: &NodeId) -> Option<Block> {
-        let kademlia = self.kademlia_net.lock().await;
+        let kademlia_net = Arc::clone(&self.kademlia_net);
+        let Ok(kademlia) = kademlia_net.try_lock() else {
+            info!("Failed to lock DHTNode");
+            return None;
+        };
 
         let fetch_block = match kademlia.find_value(block_hash).await {
             Ok(values) => values,
-            Err(_) => return None,
+            Err(_) => {
+                return None;
+            }
         };
 
         let Some(block) = fetch_block else {
@@ -182,7 +218,10 @@ impl NetworkNode {
         search_block_hash: &NodeId,
         ttl: u32,
     ) -> impl Iterator<Item = Block> {
-        let block_chain = self.block_chain.lock().await;
+        let block_chain = Arc::clone(&self.block_chain);
+        let Ok(block_chain) = block_chain.try_lock() else {
+            return vec![].into_iter();
+        };
 
         let mut counter = 0;
         let mut founded_blocks = Vec::<Block>::new();
@@ -193,6 +232,7 @@ impl NetworkNode {
         };
 
         let Some(mut block) = self.search_for_block(search_block_hash).await else {
+            info!("Block not found: {:#?}", search_block_hash);
             return Vec::new().into_iter();
         };
 
@@ -225,7 +265,11 @@ impl NetworkNode {
 
     pub async fn sync(&self) -> Result<(), ()> {
         let fetch_chain_head = {
-            let block_chain = self.block_chain.lock().await;
+            let block_chain = Arc::clone(&self.block_chain);
+            let Ok(block_chain) = block_chain.try_lock() else {
+                return Err(());
+            };
+
             block_chain.get_blockchain_head().cloned()
         };
 
@@ -233,24 +277,26 @@ impl NetworkNode {
             return Err(());
         };
 
-        info!("Fething block... {:#?}", chain_head);
-        let Some(last_block) = self.fetch_last_block_header(chain_head).await else {
+        let Some(last_block) = self.fetch_last_block_header(chain_head.clone()).await else {
             return Err(());
         };
 
-        info!("Fething block... {:#?}", last_block);
         let search_key = NodeId::new(&last_block.hash);
+        info!("Searching for block: {:#?}", search_key);
         for block in self.fetch_block_chain(&search_key, MAX_TTL).await {
-            let mut block_chain = self.block_chain.lock().await;
+            let block_chain = Arc::clone(&self.block_chain);
+            let Ok(mut block_chain) = block_chain.try_lock() else {
+                return Err(());
+            };
 
+            info!("Appending block: {:#?}", block);
             match block_chain.append_block(&block) {
                 Ok(_) | Err(BlockChainError::BlockAlreadyPersisted) => continue,
                 Err(_) => panic!("Failed to sync node"),
             }
         }
 
-        // It anounces that this block header it's the chain's global head
-        self.update_global_bc_head(&last_block).await;
+        // self.update_global_bc_head(&last_block).await;
 
         println!("blockchain: {:#?}", self.block_chain);
         Ok(())
@@ -259,7 +305,11 @@ impl NetworkNode {
     pub async fn fetch_last_block_header(&self, tip: Block) -> Option<BlockHeader> {
         let mut candidate_blocks = vec![tip.header];
 
-        let kademlia = self.kademlia_net.lock().await;
+        let kademlia_net = Arc::clone(&self.kademlia_net);
+        let Ok(kademlia) = kademlia_net.try_lock() else {
+            return None;
+        };
+
         let mut closest_nodes = match kademlia.node_lookup(&kademlia.core.id).await {
             Ok(nodes) => nodes,
             Err(_) => return None,
@@ -267,7 +317,6 @@ impl NetworkNode {
 
         while let Some(search_node) = closest_nodes.pop() {
             let search_key = NodeId::create_chain_head(search_node.id.clone());
-            info!("Search Key: {:#?}", search_key);
 
             let block_header = match kademlia.find_value(&search_key).await {
                 Ok(result) => result,
@@ -276,17 +325,14 @@ impl NetworkNode {
                 }
             };
 
-            info!("Checking header:::... {:#?}", block_header);
             let Some(block) = block_header else {
                 continue;
             };
 
-            info!("Checking ref:::... {:#?}", block);
             let Some(block) = block.as_any().downcast_ref::<BlockHeader>() else {
                 continue;
             };
 
-            info!("Gain block: {:#?}", block);
             if !block.validate_signature(search_node.keys.public_key) {
                 continue;
             }
@@ -303,7 +349,10 @@ impl NetworkNode {
     }
 
     pub async fn get_connection(&self) -> Result<Node, Box<dyn Error + '_>> {
-        let kademlia = self.kademlia_net.lock().await;
+        let kademlia_net = Arc::clone(&self.kademlia_net);
+        let Ok(kademlia) = kademlia_net.try_lock() else {
+            return Err("Failed to lock DHTNode".into());
+        };
 
         let public_key = kademlia.core.keys.public_key;
         let addr = kademlia.core.get_addr()?;

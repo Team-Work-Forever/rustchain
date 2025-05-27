@@ -29,12 +29,26 @@ impl NetworkNode {
         &self,
         storage: impl NetworkNodeStorage,
     ) -> Result<(), StoreNodeError> {
+        let block_chain_tx = Arc::clone(&self.block_chain);
+        let kademlia_net = Arc::clone(&self.kademlia_net);
+
         let persist = {
-            let block_chain = self.block_chain.lock().await;
+            let Ok(block_chain) = block_chain_tx.try_lock() else {
+                return Err(StoreNodeError::PersistError);
+            };
 
-            let kademlia = self.kademlia_net.lock().await;
+            let Ok(kademlia) = kademlia_net.try_lock() else {
+                return Err(StoreNodeError::PersistError);
+            };
 
-            let dht = kademlia.into_persist().await;
+            let Ok(distributed_hash_tb) = kademlia.distributed_hash_tb.try_lock() else {
+                return Err(StoreNodeError::PersistError);
+            };
+
+            let dht = PersistDHTNode {
+                core: kademlia.core.clone(),
+                distributed_hash_tb: distributed_hash_tb.clone(),
+            };
 
             Ok(PersistNodeNetwork {
                 block_chain: block_chain.clone(),

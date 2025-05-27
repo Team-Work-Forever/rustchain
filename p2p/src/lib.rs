@@ -12,3 +12,4 @@ pub mod cli;
 pub mod models;
 pub mod term;
 pub mod utils;
+pub mod vars;
