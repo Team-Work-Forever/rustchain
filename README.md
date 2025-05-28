@@ -1,12 +1,12 @@
-🦀 RustChain: A project developed on FCUP - U.C SSD
+# 🦀 RustChain: A project developed on FCUP - U.C SSD
 
 RustChain is a public, non-permissioned blockchain implemented in Rust, designed to serve as a decentralized ledger for auction transactions. This project was developed as part of a master's degree program, focusing on secure, transparent, and distributed systems.
 
-📚 Project Overview
+## 📚 Project Overview
 
 The primary objective of RustChain is to create a decentralized platform that records auction transactions securely and transparently. By leveraging Rust's safety and concurrency features, the project aims to ensure high performance and reliability in a distributed environment.
 
-🚀 Features
+## 🚀 Features
 
 `Block Creation`: Implements the logic for creating and linking blocks containing auction data.
 
@@ -16,7 +16,7 @@ The primary objective of RustChain is to create a decentralized platform that re
 
 `Data Integrity`: Utilizes cryptographic techniques to maintain the integrity and immutability of auction records.
 
-🛠️ Project Structure
+## 🛠️ Project Structure
 
 The repository is organized into the following main components:
 
@@ -26,7 +26,7 @@ The repository is organized into the following main components:
 
 Makefile: Provides build and run commands for the project.
 
-🧪 Getting Started
+## 🧪 Getting Started
 
 Prerequisites
 
