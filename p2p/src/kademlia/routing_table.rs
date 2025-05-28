@@ -88,7 +88,11 @@ impl RoutingTable {
         kbucket.remove(node.clone());
     }
 
-    pub(crate) fn get_closest_nodes(&self, key: &NodeId, count: usize) -> Vec<NodeDistance> {
+    pub(crate) async fn get_closest_nodes(
+        &mut self,
+        key: &NodeId,
+        count: usize,
+    ) -> Vec<NodeDistance> {
         let mut distances = self
             .kbuckets
             .iter()
@@ -98,6 +102,12 @@ impl RoutingTable {
             .collect::<Vec<_>>();
 
         distances.sort();
-        distances.into_iter().take(count).collect()
+        let sort_distances = distances.into_iter().take(count).collect::<Vec<_>>();
+
+        for distance_node in &sort_distances {
+            self.insert_node(&distance_node.1).await;
+        }
+
+        sort_distances
     }
 }

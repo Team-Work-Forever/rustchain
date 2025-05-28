@@ -19,55 +19,69 @@ use super::network_node::NetworkNode;
 #[async_trait]
 impl DHTEventHandler for NetworkNode {
     async fn on_event(&self, event: DHTEvent) {
+        if let Err(_) = self.sync().await {
+            info!("Failed to sync with the network");
+            return;
+        }
+
         match event {
             DHTEvent::Store(kademlia_data) => {
-                if let Some(header) = kademlia_data.as_any().downcast_ref::<BlockHeader>() {
-                    info!("Chain tip recived Recived! {:#?}", header);
-                }
+                let check_block_filter =
+                    if let Some(header) = kademlia_data.as_any().downcast_ref::<BlockHeader>() {
+                        info!("Chain tip recived Recived! {:#?}", header);
 
-                if let Some(block) = kademlia_data.as_any().downcast_ref::<Block>() {
-                    info!("Block Recived!");
+                        let block_id = NodeId::new(&header.hash);
+                        let Some(block) = self.search_for_block(&block_id).await else {
+                            info!("Failed to fetch block with id: {:#?}", block_id);
+                            return;
+                        };
 
-                    let block_chain_tx = Arc::clone(&self.block_chain);
-                    let Ok(mut block_chain) = block_chain_tx.try_lock() else {
-                        return;
+                        Some(block)
+                    } else if let Some(block) = kademlia_data.as_any().downcast_ref::<Block>() {
+                        Some(block.clone())
+                    } else {
+                        info!("Received data is not a Block or BlockHeader");
+                        None
                     };
 
-                    match block_chain.append_block(block) {
-                        Ok(_) => {
-                            let block_key = NodeId::new(&block.header.hash);
-                            let block = block.clone();
+                if let Some(block) = check_block_filter {
+                    info!("Block Recived!");
+                    let block_chain_tx = Arc::clone(&self.block_chain);
 
-                            let kademlia = Arc::clone(&self.kademlia_net);
-                            tokio::spawn(async move {
-                                if let Ok(kademlia) = kademlia.try_lock() {
-                                    let _ = kademlia.store(&block_key, Box::new(block)).await;
-                                    info!("Block repropagated to the network");
-                                }
-                            });
-                        }
-                        Err(BlockChainError::ChainBroken) => {
-                            let last_key = NodeId::new(&block.header.hash);
-                            for incoming in self.fetch_block_chain(&last_key, MAX_TTL).await {
-                                if let None = block_chain.remove_last() {
-                                    break;
-                                }
+                    {
+                        let Ok(mut block_chain) = block_chain_tx.try_lock() else {
+                            return;
+                        };
 
-                                match block_chain.append_block(&incoming) {
-                                    Ok(ok) => ok,
-                                    _ => break,
-                                };
+                        match block_chain.append_block(&block) {
+                            Ok(_) => {
+                                let block_key = NodeId::new(&block.header.hash);
+                                let block = block.clone();
+
+                                let kademlia = Arc::clone(&self.kademlia_net);
+                                tokio::spawn(async move {
+                                    if let Ok(kademlia) = kademlia.try_lock() {
+                                        let _ = kademlia.store(&block_key, Box::new(block)).await;
+                                        info!("Block repropagated to the network");
+                                    }
+                                });
                             }
-                        }
-                        Err(BlockChainError::InvalidBlock) => info!("invalid block"), // PoR - decrease peer's score
-                        Err(BlockChainError::BlockAlreadyPersisted) => {
-                            info!("Block already persisted")
-                        }
-                        Err(BlockChainError::BlockNotFound) => {
-                            info!("Failed to fetch block")
+                            Err(BlockChainError::ChainBroken) => {
+                                info!("Chain broken mate, fixing it...");
+                                self.fix_block_chain(&block.header).await;
+                            }
+                            Err(BlockChainError::InvalidBlock) => info!("invalid block"), // PoR - decrease peer's score
+                            Err(BlockChainError::BlockAlreadyPersisted) => {
+                                info!("Block already persisted")
+                            }
+                            Err(BlockChainError::BlockNotFound) => {
+                                info!("Failed to fetch block")
+                            }
                         }
                     }
                 }
+
+                self.persist_state().await;
             }
         }
     }
@@ -96,7 +110,6 @@ impl NetworkNode {
                 return;
             };
 
-            // info!("Chain Tip Key: {}", hex::encode(kademlia.core.id.0));
             NodeId::create_chain_head(kademlia.core.id.clone())
         };
 
@@ -110,42 +123,50 @@ impl NetworkNode {
         };
 
         if let Err(_) = store_stuff {
-            // make a list to retry at least 3 times, with a 3 second span
-            // implement like a try 3 times over thingy
             info!("Failed to store block: chain thread")
         }
 
         info!("Update Chain Head on network");
     }
 
-    async fn fix_block_chain(&self, last_block: &BlockHeader) {
+    pub async fn fix_block_chain(&self, last_block: &BlockHeader) {
         let block_chain = Arc::clone(&self.block_chain);
         let last_key = NodeId::new(&last_block.hash);
-        let Ok(mut block_chain) = block_chain.try_lock() else {
-            return;
-        };
 
         for incoming in self.fetch_block_chain(&last_key, MAX_TTL).await {
-            if let None = block_chain.remove_last() {
-                break;
-            }
+            {
+                let Ok(mut block_chain) = block_chain.try_lock() else {
+                    info!("Failed to lock block chain");
+                    continue;
+                };
 
-            match block_chain.append_block(&incoming) {
-                Ok(ok) => ok,
-                _ => break,
+                if let None = block_chain.remove_last() {
+                    info!("Failed to remove last block from the chain");
+                    continue;
+                }
+
+                match block_chain.append_block(&incoming) {
+                    Ok(ok) => ok,
+                    _ => {
+                        info!("Failed to remove last block from the chain");
+                        continue;
+                    }
+                };
             };
         }
-
-        info!("Fix chain");
     }
 }
 
 #[async_trait]
 impl BlockChainEventHandler for NetworkNode {
     async fn on_event(&self, event: BlockChainEvent) {
+        if let Err(_) = self.sync().await {
+            info!("Failed to sync with the network");
+            return;
+        }
+
         match event {
             BlockChainEvent::AddBlock(block) => {
-                info!("recive block...");
                 let block_key = NodeId::new(&block.header.hash);
 
                 let last_block = {
@@ -172,8 +193,6 @@ impl BlockChainEventHandler for NetworkNode {
                 };
 
                 if let Err(_) = propagate_block {
-                    // make a list to retry at least 3 times, with a 3 second span
-                    // implement like a try 3 times over thingy
                     info!("Failed to propagate block: chain thread")
                 }
 

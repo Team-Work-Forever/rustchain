@@ -125,7 +125,6 @@ impl BlockChain {
                     })
                 };
 
-                info!("Not understanding");
                 {
                     let event_handler = Arc::clone(&event_handler);
                     event_handler
@@ -208,12 +207,10 @@ impl BlockChain {
         };
 
         if !block.validate(DoubleHasher::default(), block.header.merkle_root) {
-            // if isn't valid then do something to announce that this is a maliciuse node
             return Err(BlockChainError::InvalidBlock);
         }
 
         if prev_block.header.hash != block.header.prev_hash {
-            // it means it must perform a look_up to fetch the prev block until it finds the correct one, althoguh with a KMAX limit
             return Err(BlockChainError::ChainBroken);
         }
 

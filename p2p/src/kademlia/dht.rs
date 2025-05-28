@@ -4,7 +4,6 @@ use std::{
     sync::Arc,
 };
 
-use log::info;
 use thiserror::Error;
 use tokio::sync::Mutex;
 
@@ -70,7 +69,6 @@ impl DHTNode {
         let routing_table = Arc::clone(&self.routing_table);
         {
             if let Ok(mut routing_table) = routing_table.try_lock() {
-                info!("Init insert");
                 routing_table.insert_node(&boostrap_node).await;
             }
         }
@@ -80,7 +78,6 @@ impl DHTNode {
                 return None;
             };
 
-            info!("More nodes");
             update_nodes
         };
 
@@ -89,7 +86,6 @@ impl DHTNode {
             for node in nodes {
                 if let Ok(mut routing_table) = routing_table.try_lock() {
                     routing_table.insert_node(&node).await;
-                    info!("Insert each one");
                 }
             }
         }
@@ -151,7 +147,6 @@ impl DHTNode {
             return Err(KademliaError::StoreFailedError);
         };
 
-        info!("Closest nodes: {:#?}", closest_nodes);
         for node in closest_nodes.clone() {
             let Ok(mut client) = GrpcNetwork::connect_over(self.core.clone(), node.clone()).await
             else {
@@ -196,15 +191,20 @@ impl DHTNode {
     pub async fn node_lookup(&self, target_id: &NodeId) -> Result<Vec<Node>, KademliaError> {
         let routing_table = Arc::clone(&self.routing_table);
 
-        let Ok(routing_table) = routing_table.try_lock() else {
-            return Err(KademliaError::FailedAccessError);
+        let mut check_nodes = {
+            let Ok(mut routing_table) = routing_table.try_lock() else {
+                return Err(KademliaError::FailedAccessError);
+            };
+
+            VecDeque::from(
+                routing_table
+                    .get_closest_nodes(&target_id, KBUCKET_MAX)
+                    .await,
+            )
         };
 
         let mut visited_nodes = HashSet::<NodeId>::new();
         let mut closest_nodes = Vec::new();
-
-        let mut check_nodes =
-            VecDeque::from(routing_table.get_closest_nodes(&target_id, KBUCKET_MAX));
 
         while let Some(node_distance) = check_nodes.pop_front() {
             let current_node = node_distance.1;
@@ -271,20 +271,24 @@ impl DHTNode {
         key: &NodeId,
     ) -> Result<Option<Box<dyn KademliaData>>, KademliaError> {
         let routing_table = Arc::clone(&self.routing_table);
-        let Ok(routing_table) = routing_table.try_lock() else {
-            return Err(KademliaError::FailedAccessError);
+        let mut check_nodes = {
+            let Ok(mut routing_table) = routing_table.try_lock() else {
+                return Err(KademliaError::FailedAccessError);
+            };
+
+            VecDeque::from(routing_table.get_closest_nodes(&key, KBUCKET_MAX).await)
         };
 
-        // self, search for the value first!
         let dht_tx = Arc::clone(&self.distributed_hash_tb);
-        if let Ok(dht) = dht_tx.try_lock() {
-            if let Some(value) = dht.get(key) {
-                return Ok(Some(value.clone()));
+        {
+            if let Ok(dht) = dht_tx.try_lock() {
+                if let Some(value) = dht.get(key) {
+                    return Ok(Some(value.clone()));
+                }
             }
         }
 
         let mut visited_nodes = HashSet::<NodeId>::new();
-        let mut check_nodes = VecDeque::from(routing_table.get_closest_nodes(&key, KBUCKET_MAX));
 
         while let Some(NodeDistance(_, current_node)) = check_nodes.pop_front() {
             if !visited_nodes.insert(current_node.id.clone()) {

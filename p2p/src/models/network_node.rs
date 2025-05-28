@@ -190,12 +190,15 @@ impl NetworkNode {
 
     pub async fn search_for_block(&self, block_hash: &NodeId) -> Option<Block> {
         let kademlia_net = Arc::clone(&self.kademlia_net);
-        let Ok(kademlia) = kademlia_net.try_lock() else {
-            info!("Failed to lock DHTNode");
-            return None;
+        let fetch_block = {
+            let Ok(kademlia) = kademlia_net.try_lock() else {
+                return None;
+            };
+
+            kademlia.find_value(block_hash).await
         };
 
-        let fetch_block = match kademlia.find_value(block_hash).await {
+        let fetch_block = match fetch_block {
             Ok(values) => values,
             Err(_) => {
                 return None;
@@ -218,21 +221,24 @@ impl NetworkNode {
         search_block_hash: &NodeId,
         ttl: u32,
     ) -> impl Iterator<Item = Block> {
-        let block_chain = Arc::clone(&self.block_chain);
-        let Ok(block_chain) = block_chain.try_lock() else {
-            return vec![].into_iter();
-        };
-
         let mut counter = 0;
         let mut founded_blocks = Vec::<Block>::new();
         let mut visited = HashSet::new();
+        let block_chain = Arc::clone(&self.block_chain);
 
-        let Some(goal_block) = block_chain.get_blockchain_head() else {
+        let goal_block = {
+            let Ok(block_chain) = block_chain.try_lock() else {
+                return vec![].into_iter();
+            };
+
+            block_chain.get_blockchain_head().cloned()
+        };
+
+        let Some(goal_block) = goal_block else {
             return vec![].into_iter();
         };
 
         let Some(mut block) = self.search_for_block(search_block_hash).await else {
-            info!("Block not found: {:#?}", search_block_hash);
             return Vec::new().into_iter();
         };
 
@@ -282,49 +288,67 @@ impl NetworkNode {
         };
 
         let search_key = NodeId::new(&last_block.hash);
-        info!("Searching for block: {:#?}", search_key);
         for block in self.fetch_block_chain(&search_key, MAX_TTL).await {
             let block_chain = Arc::clone(&self.block_chain);
-            let Ok(mut block_chain) = block_chain.try_lock() else {
-                return Err(());
+            {
+                let Ok(mut block_chain) = block_chain.try_lock() else {
+                    return Err(());
+                };
+
+                match block_chain.append_block(&block) {
+                    Ok(_) | Err(BlockChainError::BlockAlreadyPersisted) => continue,
+                    Err(_) => {}
+                }
             };
 
-            info!("Appending block: {:#?}", block);
-            match block_chain.append_block(&block) {
-                Ok(_) | Err(BlockChainError::BlockAlreadyPersisted) => continue,
-                Err(_) => panic!("Failed to sync node"),
-            }
+            self.fix_block_chain(&block.header).await;
         }
 
-        // self.update_global_bc_head(&last_block).await;
-
-        println!("blockchain: {:#?}", self.block_chain);
         Ok(())
     }
 
     pub async fn fetch_last_block_header(&self, tip: Block) -> Option<BlockHeader> {
         let mut candidate_blocks = vec![tip.header];
-
         let kademlia_net = Arc::clone(&self.kademlia_net);
-        let Ok(kademlia) = kademlia_net.try_lock() else {
+
+        let closest_nodes = {
+            let Ok(kademlia) = kademlia_net.try_lock() else {
+                return None;
+            };
+
+            let mut closest_nodes = match kademlia.node_lookup(&kademlia.core.id).await {
+                Ok(nodes) => nodes,
+                Err(_) => return None,
+            };
+
+            closest_nodes.push(kademlia.core.clone());
+            Some(closest_nodes)
+        };
+
+        let Some(mut closest_nodes) = closest_nodes else {
             return None;
         };
 
-        let mut closest_nodes = match kademlia.node_lookup(&kademlia.core.id).await {
-            Ok(nodes) => nodes,
-            Err(_) => return None,
-        };
-
+        info!("OF MOST NODES: {:#?}", closest_nodes);
         while let Some(search_node) = closest_nodes.pop() {
             let search_key = NodeId::create_chain_head(search_node.id.clone());
 
-            let block_header = match kademlia.find_value(&search_key).await {
-                Ok(result) => result,
-                _ => {
+            let block_header = {
+                let Ok(kademlia) = kademlia_net.try_lock() else {
                     continue;
-                }
+                };
+
+                let block_header = match kademlia.find_value(&search_key).await {
+                    Ok(result) => result,
+                    _ => {
+                        continue;
+                    }
+                };
+
+                block_header
             };
 
+            info!("OF MOST FOUND: {:#?}", block_header);
             let Some(block) = block_header else {
                 continue;
             };

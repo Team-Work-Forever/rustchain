@@ -175,14 +175,6 @@ impl KademliaService for GrpcNetwork {
         };
 
         {
-            let event_handler = Arc::clone(&self.event_handler);
-
-            event_handler
-                .on_event(DHTEvent::Store(decoded_value.clone()))
-                .await;
-        }
-
-        {
             let dht_clone = Arc::clone(&self.distributed_hashing_table);
             let Ok(mut dht) = dht_clone.try_lock() else {
                 return Err(tonic::Status::aborted(
@@ -207,6 +199,15 @@ impl KademliaService for GrpcNetwork {
             }
         }
 
+        // persist
+        {
+            let event_handler = Arc::clone(&self.event_handler);
+
+            event_handler
+                .on_event(DHTEvent::Store(decoded_value.clone()))
+                .await;
+        }
+
         Ok(Response::new(StoreResponse { key: key.into() }))
     }
 
@@ -229,19 +230,17 @@ impl KademliaService for GrpcNetwork {
             .map_err(|e| tonic::Status::invalid_argument(format!("Invalid node ID: {}", e)))?;
 
         let routing_table = Arc::clone(&self.routing_table);
-        let mut routing_table = {
-            let Ok(routing_table) = routing_table.try_lock() else {
+        let closest_nodes = {
+            let Ok(mut routing_table) = routing_table.try_lock() else {
                 return Err(tonic::Status::aborted(
                     "Failed to lock routing table for finding nodes",
                 ));
             };
 
-            routing_table
+            // keep record of the incoming node for future requests
+            routing_table.insert_node(&incoming_node).await;
+            routing_table.get_closest_nodes(&lookup_id, count).await
         };
-
-        // keep record of the incoming node for future requests
-        routing_table.insert_node(&incoming_node).await;
-        let closest_nodes = routing_table.get_closest_nodes(&lookup_id, count);
 
         let response = closest_nodes
             .iter()
@@ -283,19 +282,17 @@ impl KademliaService for GrpcNetwork {
         };
 
         let routing_table = Arc::clone(&self.routing_table);
-        let mut routing_table = {
-            let Ok(routing_table) = routing_table.try_lock() else {
+        let closest_nodes = {
+            let Ok(mut routing_table) = routing_table.try_lock() else {
                 return Err(Status::aborted(
                     "Failed to lock routing table for finding nodes",
                 ));
             };
 
-            routing_table
+            // keep record of the incoming node for future requests
+            routing_table.insert_node(&incoming_node).await;
+            routing_table.get_closest_nodes(&key, KBUCKET_MAX).await
         };
-
-        // keep record of the incoming node for future requests
-        routing_table.insert_node(&incoming_node).await;
-        let closest_nodes = routing_table.get_closest_nodes(&key, KBUCKET_MAX);
 
         let response = closest_nodes
             .iter()

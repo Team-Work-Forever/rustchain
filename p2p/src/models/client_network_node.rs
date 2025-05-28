@@ -111,51 +111,58 @@ impl ClientNetworkNode {
     pub async fn get_auctions(&self) -> Vec<Auction> {
         let mut auctions: HashMap<Uuid, Auction> = HashMap::new();
         let block_chain = Arc::clone(&self.network_node.block_chain);
-        let Ok(block_chain_tx) = block_chain.try_lock() else {
-            return vec![];
-        };
 
-        for block in block_chain_tx.search_blocks_on(|_| true) {
-            for (transaction, auction) in block.get_transaction::<AuctionTransaction>() {
-                match auction {
-                    AuctionTransaction::Create(create_auction) => {
-                        let auction = Auction::new(
-                            create_auction.id,
-                            transaction.from,
-                            create_auction.item.clone(),
-                            create_auction.start_price,
-                            create_auction.goal_price,
-                        );
+        {
+            let Ok(block_chain) = block_chain.try_lock() else {
+                return vec![];
+            };
 
-                        auctions.insert(auction.id, auction);
-                    }
-                    AuctionTransaction::Bid(place_bid) => {
-                        let bid = Bid::new(
-                            place_bid.id,
-                            transaction.from,
-                            place_bid.auction_id,
-                            place_bid.amount,
-                        );
+            if let Err(_) = self.network_node.sync().await {
+                info!("Failed to sync the blockchain.");
+            }
 
-                        let Some(auction) = auctions.get_mut(&bid.auction_id) else {
-                            continue;
-                        };
+            for block in block_chain.search_blocks_on(|_| true) {
+                for (transaction, auction) in block.get_transaction::<AuctionTransaction>() {
+                    match auction {
+                        AuctionTransaction::Create(create_auction) => {
+                            let auction = Auction::new(
+                                create_auction.id,
+                                transaction.from,
+                                create_auction.item.clone(),
+                                create_auction.start_price,
+                                create_auction.goal_price,
+                            );
 
-                        auction.add_bid(bid);
-                    }
-                    AuctionTransaction::Cancel(cancel_auction) => {
-                        let Some(auction) = auctions.get_mut(&cancel_auction.auction_id) else {
-                            continue;
-                        };
+                            auctions.insert(auction.id, auction);
+                        }
+                        AuctionTransaction::Bid(place_bid) => {
+                            let bid = Bid::new(
+                                place_bid.id,
+                                transaction.from,
+                                place_bid.auction_id,
+                                place_bid.amount,
+                            );
 
-                        auction.cancel();
-                    }
-                    AuctionTransaction::End(end_auction) => {
-                        let Some(auction) = auctions.get_mut(&end_auction.auction_id) else {
-                            continue;
-                        };
+                            let Some(auction) = auctions.get_mut(&bid.auction_id) else {
+                                continue;
+                            };
 
-                        auction.terminate();
+                            auction.add_bid(bid);
+                        }
+                        AuctionTransaction::Cancel(cancel_auction) => {
+                            let Some(auction) = auctions.get_mut(&cancel_auction.auction_id) else {
+                                continue;
+                            };
+
+                            auction.cancel();
+                        }
+                        AuctionTransaction::End(end_auction) => {
+                            let Some(auction) = auctions.get_mut(&end_auction.auction_id) else {
+                                continue;
+                            };
+
+                            auction.terminate();
+                        }
                     }
                 }
             }
@@ -441,79 +448,83 @@ impl ClientNetworkNode {
         term::reset()?;
 
         let block_chain = Arc::clone(&self.network_node.block_chain);
-        let Ok(block_chain_tx) = block_chain.try_lock() else {
-            term::println("Failed to lock the blockchain.", style::Color::Red)?;
-            return Ok(());
-        };
 
-        for block in block_chain_tx.search_blocks_on(|_| true) {
-            let mut color = style::Color::Magenta;
+        {
+            let Ok(block_chain_tx) = block_chain.try_lock() else {
+                term::println("Failed to lock the blockchain.", style::Color::Red)?;
+                return Ok(());
+            };
 
-            if block.header.index % 2 == 0 {
-                color = style::Color::Cyan;
-            }
+            for block in block_chain_tx.search_blocks_on(|_| true) {
+                let mut color = style::Color::Magenta;
 
-            term::println(format!("Index: {}", block.header.index).as_str(), color)?;
-            term::println(
-                format!("Merkle root: {}", hex::encode(block.header.merkle_root)).as_str(),
-                color,
-            )?;
-            term::println(format!("Nonce: {}", block.header.nonce).as_str(), color)?;
-            term::println(
-                format!("Hash: {}", hex::encode(block.header.hash)).as_str(),
-                color,
-            )?;
-            term::println(
-                format!("Prev Hash: {}", hex::encode(block.header.prev_hash)).as_str(),
-                color,
-            )?;
-            term::println(
-                format!("Timestamp: {}\n", block.header.timestamp).as_str(),
-                color,
-            )?;
+                if block.header.index % 2 == 0 {
+                    color = style::Color::Cyan;
+                }
 
-            for (transaction, auction) in block.get_transaction::<AuctionTransaction>() {
-                let color = style::Color::Green;
+                term::println(format!("Index: {}", block.header.index).as_str(), color)?;
+                term::println(
+                    format!("Merkle root: {}", hex::encode(block.header.merkle_root)).as_str(),
+                    color,
+                )?;
+                term::println(format!("Nonce: {}", block.header.nonce).as_str(), color)?;
+                term::println(
+                    format!("Hash: {}", hex::encode(block.header.hash)).as_str(),
+                    color,
+                )?;
+                term::println(
+                    format!("Prev Hash: {}", hex::encode(block.header.prev_hash)).as_str(),
+                    color,
+                )?;
+                term::println(
+                    format!("Timestamp: {}\n", block.header.timestamp).as_str(),
+                    color,
+                )?;
 
-                match auction {
-                    AuctionTransaction::Create(create_auction) => {
-                        term::println(
-                            format!(
-                                "Created Auction: {} with item {}",
-                                create_auction.id, create_auction.item.name
-                            )
-                            .as_str(),
-                            color,
-                        )?;
-                    }
-                    AuctionTransaction::Bid(place_bid) => {
-                        term::println(
-                            format!(
-                                "Bid on Auction {}: {} € by {}",
-                                place_bid.auction_id,
-                                place_bid.amount,
-                                hex::encode(&transaction.from)
-                            )
-                            .as_str(),
-                            color,
-                        )?;
-                    }
-                    AuctionTransaction::Cancel(cancel_auction) => {
-                        term::println(
-                            format!("Cancelled Auction: {}", cancel_auction.auction_id).as_str(),
-                            color,
-                        )?;
-                    }
-                    AuctionTransaction::End(end_auction) => {
-                        term::println(
-                            format!("Ended Auction: {}", end_auction.auction_id).as_str(),
-                            color,
-                        )?;
+                for (transaction, auction) in block.get_transaction::<AuctionTransaction>() {
+                    let color = style::Color::Green;
+
+                    match auction {
+                        AuctionTransaction::Create(create_auction) => {
+                            term::println(
+                                format!(
+                                    "Created Auction: {} with item {}",
+                                    create_auction.id, create_auction.item.name
+                                )
+                                .as_str(),
+                                color,
+                            )?;
+                        }
+                        AuctionTransaction::Bid(place_bid) => {
+                            term::println(
+                                format!(
+                                    "Bid on Auction {}: {} € by {}",
+                                    place_bid.auction_id,
+                                    place_bid.amount,
+                                    hex::encode(&transaction.from)
+                                )
+                                .as_str(),
+                                color,
+                            )?;
+                        }
+                        AuctionTransaction::Cancel(cancel_auction) => {
+                            term::println(
+                                format!("Cancelled Auction: {}", cancel_auction.auction_id)
+                                    .as_str(),
+                                color,
+                            )?;
+                        }
+                        AuctionTransaction::End(end_auction) => {
+                            term::println(
+                                format!("Ended Auction: {}", end_auction.auction_id).as_str(),
+                                color,
+                            )?;
+                        }
                     }
                 }
-            }
 
-            term::println("", style::Color::Grey)?;
+                term::println("", style::Color::Grey)?;
+            }
         }
 
         term::println("End of Block Chain", style::Color::Cyan)?;
